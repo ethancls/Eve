@@ -1,0 +1,182 @@
+.usage-donut {
+  flex-shrink: 0;
+  transform: rotate(-90deg);
+}
+
+.usage-empty {
+  color: var(--text-muted);
+  line-height: 1;
+}
+
+.usage-empty.compact {
+  font-size: 12.5px;
+}
+
+.usage-empty.full {
+  font-size: 12px;
+}
+
+.usage-percent {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+.usage-percent.compact {
+  gap: 8px;
+}
+
+.usage-percent.full {
+  gap: 8px;
+}
+
+.usage-percent-label {
+  text-align: right;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.03em;
+}
+
+.usage-percent.compact .usage-percent-label {
+  width: 3.8ch;
+  font-size: 11.4px;
+}
+
+.usage-percent.full .usage-percent-label {
+  width: 4ch;
+  font-size: 10.7px;
+}
+
+.usage-percent-value {
+  text-align: left;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.usage-percent.compact .usage-percent-value {
+  width: 6.8ch;
+  font-size: 12.6px;
+}
+
+.usage-percent.full .usage-percent-value {
+  width: 7ch;
+  font-size: 11.8px;
+}
+
+.usage-detail {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.usage-detail.compact {
+  gap: 7px;
+  justify-content: center;
+  transform: translateX(5px);
+}
+
+.usage-detail.full {
+  gap: 7px;
+}
+
+.usage-detail-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.usage-detail-text.with-percent {
+  gap: 3px;
+}
+
+.usage-detail-compact-values {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  line-height: 1;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+.usage-detail-grid-values {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 9.5ch 1ch 9.5ch;
+  align-items: center;
+  line-height: 1;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+.usage-detail-used {
+  font-weight: 700;
+}
+
+.usage-detail.compact .usage-detail-used {
+  font-size: 12px;
+}
+
+.usage-detail.full .usage-detail-used {
+  font-size: 11.8px;
+  text-align: right;
+}
+
+.usage-detail-separator {
+  color: var(--text-secondary);
+}
+
+.usage-detail.compact .usage-detail-separator {
+  font-size: 11.2px;
+}
+
+.usage-detail.full .usage-detail-separator {
+  font-size: 11.2px;
+  text-align: center;
+}
+
+.usage-detail-total {
+  color: var(--text-primary);
+}
+
+.usage-detail.compact .usage-detail-total {
+  font-size: 12px;
+}
+
+.usage-detail.full .usage-detail-total {
+  font-size: 11.8px;
+  text-align: left;
+}
+
+.usage-detail-percent {
+  font-weight: 700;
+  line-height: 1;
+}
+
+.usage-detail.compact .usage-detail-percent {
+  font-size: 11.4px;
+}
+
+.usage-detail.full .usage-detail-percent {
+  font-size: 10.8px;
+}
+
+.usage-tone-muted {
+  color: var(--text-muted);
+}
+
+.usage-tone-accent {
+  color: var(--accent);
+}
+
+.usage-tone-warn {
+  color: var(--suspended);
+}
+
+.usage-tone-danger {
+  color: var(--stopped);
+}

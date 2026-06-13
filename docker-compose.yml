@@ -1,0 +1,20 @@
+version: "3.8"
+
+services:
+  eve:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: eve-portainer
+    ports:
+      - "8100:8100"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - eve_data:/app/data
+    environment:
+      - EVE_DB_PATH=/app/data/eve.db
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    restart: unless-stopped
+
+volumes:
+  eve_data:

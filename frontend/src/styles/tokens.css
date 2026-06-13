@@ -1,0 +1,119 @@
+/* ── Sileo overrides ────────────────────────── */
+:root {
+  --sileo-state-success: oklch(87.4% 0.219 128.5);
+  --sileo-state-error:   oklch(62% 0.21 25);
+  --sileo-state-warning: oklch(75% 0.18 55);
+  --sileo-state-info:    oklch(70% 0.15 240);
+  --sileo-width: 400px;
+}
+[data-sileo-title] {
+  font-family: var(--font-sans) !important;
+  font-weight: 600 !important;
+  font-size: 13px !important;
+  color: #efefef !important;
+  text-transform: none !important;
+  white-space: nowrap !important;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+[data-sileo-description] {
+  font-family: var(--font-mono) !important;
+  font-size: 11.5px !important;
+  color: #8a8a8a !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+[data-sileo-viewport] {
+  z-index: 1200 !important;
+}
+
+/* ── Design tokens ─────────────────────────── */
+:root {
+  --font-sans:    'Syne', sans-serif;
+  --font-mono:    'IBM Plex Mono', monospace;
+  --bg:           #0a0a0a;
+  --card-1:       #111111;
+  --card-2:       #161616;
+  --card-3:       #1e1e1e;
+  --accent:       #5b91ff;
+  --accent-fill:  #ff7bdc;
+  --accent-text:  #d7e5ff;
+  --accent-hover: #78a8ff;
+  --accent-dim:   rgba(91,145,255,0.14);
+  --accent-border:rgba(255,123,220,0.30);
+  --focus-ring:   rgba(91,145,255,0.48);
+  --text-primary: #efefef;
+  --text-secondary:#8a8a8a;
+  --text-muted:   #7d7d7d;
+  --border:       rgba(178,205,255,0.08);
+  --border-hover: rgba(255,190,238,0.22);
+  --running:      #4ade80;
+  --stopped:      #ff5a5f;
+  --suspended:    #ff9f0a;
+  --shadow-sm:    0 1px 3px rgba(0,0,0,0.5);
+  --shadow-md:    0 4px 20px rgba(0,0,0,0.4);
+  --shadow-lg:    0 12px 40px rgba(0,0,0,0.6);
+  --r-card:       18px;
+  --r-sm:         10px;
+  --sidebar-w:    230px;
+  --sidebar-collapsed-w: 64px;
+  --sidebar-bg: var(--card-1);
+  --sidebar-border: var(--border);
+  --sidebar-radius: 0 25px 25px 0;
+  --mobile-topbar-height: 60px;
+  --z-mobile-drawer: 1500;
+  --z-mobile-backdrop: 1490;
+  --sidebar-anim-duration: 320ms;
+  --sidebar-anim-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --sidebar-transition: width var(--sidebar-anim-duration) var(--sidebar-anim-ease);
+}
+
+/* ── Light theme overrides ──────────────────── */
+[data-theme="light"] {
+  --bg:            #f6f8f4;
+  --card-1:        #fcfdfb;
+  --card-2:        #f5f8f2;
+  --card-3:        #edf2e9;
+  --accent:        #5b91ff;
+  --accent-fill:   #ff7bdc;
+  --accent-text:   #3b76f0;
+  --accent-hover:  #3f7dff;
+  --accent-dim:    rgba(91,145,255,0.14);
+  --accent-border: rgba(255,123,220,0.30);
+  --focus-ring:    rgba(91,145,255,0.34);
+  --text-primary:  #152114;
+  --text-secondary:#4d5f4b;
+  --text-muted:    #6d7f6b;
+  --border:        rgba(21,33,20,0.12);
+  --border-hover:  rgba(21,33,20,0.22);
+  --running:       #16a34a;
+  --stopped:       #e5484d;
+  --suspended:     #b76a14;
+  --shadow-sm:     0 1px 3px rgba(0,0,0,0.06);
+  --shadow-md:     0 4px 20px rgba(0,0,0,0.07);
+  --shadow-lg:     0 12px 40px rgba(0,0,0,0.13);
+  --sidebar-bg:    var(--card-1);
+  --sidebar-border:var(--border);
+  --sidebar-radius: 0 25px 25px 0;
+}
+[data-theme="light"] .badge-running  { background:var(--accent-dim); color:var(--accent-text); border-color:var(--accent-border); }
+[data-theme="light"] .badge-stopped  { background:rgba(229,72,77,0.12); color:var(--stopped); border-color:rgba(229,72,77,0.32); }
+[data-theme="light"] .badge-suspended{ background:rgba(183,106,20,0.10); color:#8f4f0a; border-color:rgba(183,106,20,0.25); }
+[data-theme="light"] .state-badge-running  { color:var(--accent-text); }
+[data-theme="light"] .state-badge-stopped  { color:var(--stopped); }
+[data-theme="light"] .state-badge-suspended{ color:#7f480c; }
+[data-theme="light"] .state-badge-deleted  { color:var(--text-muted); }
+[data-theme="light"] .state-badge-starting { color:var(--accent-text); }
+[data-theme="light"] .state-badge-stopping { color:#802020; }
+[data-theme="light"] .nav-item.active { color:var(--accent-text); }
+[data-theme="light"] .btn-ghost:hover { background: color-mix(in srgb, var(--text-primary) 8%, transparent); }
+[data-theme="light"] .filter-pill.active {
+  color: var(--accent-text);
+}
+[data-theme="light"] .filter-pill.active .pill-count {
+  color: var(--accent-text);
+}
+[data-theme="light"] .custom-select-dropdown {
+  box-shadow: 0 8px 22px rgba(20, 24, 33, 0.10) !important;
+}

@@ -1,0 +1,188 @@
+/* ── Responsive ─────────────────────────────── */
+@media (max-width:1240px) {
+  :root { --sidebar-w:208px; }
+  .page { padding: 24px; }
+  .new-instance-layout {
+    grid-template-columns: 1fr !important;
+  }
+  .new-instance-layout > :last-child {
+    order: -1;
+  }
+  .new-instance-layout > :last-child > div {
+    position: static !important;
+  }
+}
+
+@media (max-width:1080px) {
+  .page-title { font-size: 26px; }
+  .dashboard-header-actions {
+    width: 100%;
+    justify-content: flex-start;
+    align-items: center;
+    flex-wrap: nowrap;
+  }
+  .dashboard-header-actions .global-search {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .dashboard-header-actions .global-search-trigger {
+    width: 100% !important;
+  }
+  .dashboard-header-actions .dashboard-new-btn {
+    flex: 0 0 auto;
+    width: auto;
+  }
+  .instance-details-header-actions {
+    justify-content: flex-start;
+  }
+  .dashboard-header-actions .btn-ghost,
+  .dashboard-header-actions .btn-accent {
+    justify-content: center;
+  }
+  .instances-controls-right {
+    width: 100%;
+    margin-left: 0 !important;
+  }
+  .instances-search-control {
+    flex: 1 1 180px;
+    width: auto !important;
+    min-width: 140px;
+  }
+}
+
+@media (max-width:900px) {
+  .page { padding: 18px; }
+  .instance-details-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .instances-controls {
+    flex-direction: column;
+    align-items: stretch !important;
+  }
+  .instances-state-filters {
+    width: 100%;
+    flex: 0 0 auto !important;
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px !important;
+  }
+  .instances-state-filters .filter-pill {
+    width: 100%;
+    justify-content: center;
+  }
+  .instances-controls-right {
+    width: 100%;
+    flex: 0 0 auto !important;
+  }
+  .instances-controls-right > * {
+    flex: 1 1 100%;
+    min-width: 0 !important;
+    width: 100% !important;
+  }
+  .instances-view-toggle {
+    justify-content: stretch;
+  }
+  .instances-view-toggle > button {
+    flex: 1 1 50%;
+    justify-content: center;
+  }
+  .instances-batch-actions {
+    align-items: flex-start !important;
+    gap: 8px !important;
+  }
+  .instances-batch-toolbar {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+  .new-instance-primary-fields,
+  .new-instance-template-fields {
+    grid-template-columns: 1fr !important;
+  }
+  .new-instance-mount-row {
+    grid-template-columns: 1fr !important;
+  }
+  .preview-resources-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+  .resource-chart-controls {
+    width: 100% !important;
+  }
+  .snapshots-create-form {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+@media (max-width:780px) {
+  .layout-mobile .page-title {
+    display: none;
+  }
+  .instance-details-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .layout-mobile {
+    min-height: 100dvh;
+  }
+  .main-content-mobile {
+    overflow: auto;
+  }
+  .page { padding: 14px; }
+  .daemon-alert-wrap {
+    padding: 14px 14px 0;
+  }
+  .global-back-link-wrap {
+    padding: 8px 14px 0;
+  }
+  .dashboard-instances-grid,
+  .instances-cards-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .global-search-trigger {
+    width: 100% !important;
+  }
+  .global-search {
+    width: 100%;
+  }
+  .global-search-kbd {
+    display: none;
+  }
+  .resource-chart-header {
+    align-items: flex-start !important;
+  }
+  .new-instance-header-actions {
+    width: 100%;
+  }
+  .new-instance-header-actions > button {
+    flex: 1 1 calc(50% - 8px);
+    justify-content: center;
+  }
+  .instance-details-header-actions > * {
+    flex: 1 1 calc(50% - 8px);
+    justify-content: center;
+  }
+  .instances-table-shell {
+    border-radius: 14px;
+  }
+  .instances-table-scroll {
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+@media (max-width:560px) {
+  .page-title { font-size: 23px; letter-spacing: -0.4px; }
+  .btn-accent,
+  .btn-ghost,
+  .btn-danger {
+    height: 40px;
+    padding: 0 12px;
+  }
+  .preview-resources-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .overview-stats-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .instances-totals {
+    font-size: 11px !important;
+  }
+}
