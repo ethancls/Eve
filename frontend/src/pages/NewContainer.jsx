@@ -56,7 +56,7 @@ function TabBar({ tab, onChange, badges }) {
     { value: 'advanced', label: 'Advanced', badge: badges?.advanced },
   ]
   return (
-    <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', marginBottom: 24, gap: 0 }}>
+    <div className="nc-tabbar" style={{ display: 'flex', borderBottom: '1px solid var(--border)', marginBottom: 24, gap: 0 }}>
       {tabs.map(t => {
         const isActive = tab === t.value
         return (
@@ -376,7 +376,7 @@ export default function NewContainer() {
     <div className="page">
       <div className="new-instance-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 32, gap: 14, flexWrap: 'wrap' }}>
         <h1 className="page-title">New Container</h1>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div className="new-instance-header-actions" style={{ display: 'flex', gap: 8 }}>
           <button className="btn-ghost" onClick={() => navigate(-1)}>Cancel</button>
           <button className="btn-accent" onClick={handleSubmit} disabled={submitting || !form.name.trim() || !form.image.trim()}>
             <Rocket size={13} /> Launch Container
@@ -396,12 +396,12 @@ export default function NewContainer() {
 
       <TabBar tab={tab} onChange={setTab} badges={{ advanced: advancedBadge || null }} />
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(300px, 340px)', gap: 24, alignItems: 'start' }}>
+      <div className="new-instance-layout" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(300px, 340px)', gap: 24, alignItems: 'start' }}>
         <div>
           <form onSubmit={handleSubmit}>
             {tab === 'basics' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 18 }}>
+                <div className="new-instance-primary-fields" style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 18 }}>
                   <div>
                     <label className="input-label" htmlFor="nc-image">Image</label>
                     <ImageSearch value={form.image} onChange={v => set('image', v)} />
@@ -428,12 +428,12 @@ export default function NewContainer() {
 
             {tab === 'resources' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 18 }}>
+                <div className="nc-resources-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 18 }}>
                   <Stepper label="CPUs" value={form.cpus} min={1} max={16} step={1} onChange={cpus => set('cpus', cpus)} />
                   <Stepper label="RAM (MB)" value={form.memory} min={64} max={32768} step={128} onChange={memory => set('memory', memory)} />
                   <Stepper label="Disk (GB)" value={form.disk} min={1} max={500} step={1} onChange={disk => set('disk', disk)} />
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+                <div className="nc-mode-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
                   <div>
                     <label className="input-label" htmlFor="nc-mode">Mode</label>
                     <select id="nc-mode" className="input" value={form.mode} onChange={e => set('mode', e.target.value)}
@@ -478,7 +478,7 @@ export default function NewContainer() {
 
             {tab === 'advanced' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div className="nc-advanced-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <div>
                     <label className="input-label" htmlFor="nc-workdir">Workdir</label>
                     <input id="nc-workdir" className="input mono" value={form.workdir} onChange={e => set('workdir', e.target.value)} placeholder="/" />
@@ -493,7 +493,7 @@ export default function NewContainer() {
                   <textarea id="nc-env" className="input mono" value={form.env} onChange={e => set('env', e.target.value)}
                     rows={5} placeholder={'PORT=8080\nNODE_ENV=production'} style={{ maxWidth: 500 }} />
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12 }}>
+                <div className="nc-toggles-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12 }}>
                   {[
                     ['detach', 'Detach'],
                     ['tty', 'TTY'],

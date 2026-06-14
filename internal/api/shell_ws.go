@@ -38,9 +38,11 @@ func (srv *Server) handleShellWS(w http.ResponseWriter, r *http.Request) {
 	requestedSessionID := strings.TrimSpace(r.URL.Query().Get("session"))
 	sess, err := srv.shells.getOrCreate(sessionUser.ID, kind, name, requestedSessionID)
 	if err != nil {
+		srv.logAction(r, "shell open", name, "error", err.Error())
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	srv.logAction(r, "shell open", name, "ok", "")
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {

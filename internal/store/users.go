@@ -46,6 +46,7 @@ var (
 type User struct {
 	ID          string `json:"id"`
 	Login       string `json:"login"`
+	Email       string `json:"email"`
 	HasPassword bool   `json:"has_password"`
 	Name        string `json:"name"`
 	AvatarURL   string `json:"avatar_url"`
@@ -60,6 +61,7 @@ type User struct {
 type CreateUserInput struct {
 	Login       string
 	Password    string
+	Email       string
 	Name        string
 	AvatarURL   string
 	OIDCIssuer  string
@@ -69,6 +71,7 @@ type CreateUserInput struct {
 
 type UpdateUserInput struct {
 	Login       string
+	Email       string
 	Name        string
 	AvatarURL   string
 	OIDCIssuer  string
@@ -96,6 +99,7 @@ func NewUserStore(dbPath string) (*UserStore, error) {
 CREATE TABLE IF NOT EXISTS users (
 	id            TEXT PRIMARY KEY,
 	login         TEXT NOT NULL UNIQUE COLLATE NOCASE,
+	email         TEXT NOT NULL DEFAULT '',
 	password_hash TEXT NOT NULL DEFAULT '',
 	name          TEXT NOT NULL DEFAULT '',
 	avatar_url    TEXT NOT NULL DEFAULT '',
@@ -115,7 +119,10 @@ CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
 		return nil, err
 	}
 
-	return &UserStore{db: db}, nil
+			// Migration: add email column if missing
+		db.Exec(`ALTER TABLE users ADD COLUMN email TEXT NOT NULL DEFAULT ''`)
+
+		return &UserStore{db: db}, nil
 }
 
 func normalizeLogin(login string) string {
@@ -263,6 +270,7 @@ func scanUser(row scanner) (User, string, error) {
 	err := row.Scan(
 		&u.ID,
 		&u.Login,
+		&u.Email,
 		&passwordHash,
 		&u.Name,
 		&u.AvatarURL,
@@ -309,9 +317,9 @@ func (s *UserStore) EnsureDefaultOwner(login, password, name string) (bool, erro
 
 	ts := nowUTC()
 	_, err = s.db.Exec(
-		`INSERT INTO users(id,login,password_hash,name,avatar_url,oidc_issuer,oidc_subject,role,last_login,created_at,updated_at)
-		 VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-		uuid.NewString(), login, pwHash, name, "", "", "", RoleOwner, "", ts, ts,
+		`INSERT INTO users(id,login,email,password_hash,name,avatar_url,oidc_issuer,oidc_subject,role,last_login,created_at,updated_at)
+		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+		uuid.NewString(), login, "", pwHash, name, "", "", "", RoleOwner, "", ts, ts,
 	)
 	if err != nil {
 		return false, err
@@ -325,7 +333,7 @@ func (s *UserStore) EnsureDefaultAdmin(login, password, name string) (bool, erro
 
 func (s *UserStore) List() ([]User, error) {
 	rows, err := s.db.Query(
-		`SELECT id,login,password_hash,name,avatar_url,oidc_issuer,oidc_subject,role,last_login,created_at,updated_at
+		`SELECT id,login,email,password_hash,name,avatar_url,oidc_issuer,oidc_subject,role,last_login,created_at,updated_at
 		 FROM users ORDER BY lower(login) ASC`,
 	)
 	if err != nil {
@@ -346,7 +354,7 @@ func (s *UserStore) List() ([]User, error) {
 
 func (s *UserStore) GetByID(id string) (User, bool, error) {
 	row := s.db.QueryRow(
-		`SELECT id,login,password_hash,name,avatar_url,oidc_issuer,oidc_subject,role,last_login,created_at,updated_at
+		`SELECT id,login,email,password_hash,name,avatar_url,oidc_issuer,oidc_subject,role,last_login,created_at,updated_at
 		 FROM users WHERE id = ?`,
 		id,
 	)
@@ -360,7 +368,7 @@ func (s *UserStore) GetByID(id string) (User, bool, error) {
 func (s *UserStore) GetByLogin(login string) (User, bool, error) {
 	login = normalizeLogin(login)
 	row := s.db.QueryRow(
-		`SELECT id,login,password_hash,name,avatar_url,oidc_issuer,oidc_subject,role,last_login,created_at,updated_at
+		`SELECT id,login,email,password_hash,name,avatar_url,oidc_issuer,oidc_subject,role,last_login,created_at,updated_at
 		 FROM users WHERE lower(login) = lower(?)`,
 		login,
 	)
@@ -373,7 +381,7 @@ func (s *UserStore) GetByLogin(login string) (User, bool, error) {
 
 func (s *UserStore) getByIDWithSecret(id string) (userWithSecret, bool, error) {
 	row := s.db.QueryRow(
-		`SELECT id,login,password_hash,name,avatar_url,oidc_issuer,oidc_subject,role,last_login,created_at,updated_at
+		`SELECT id,login,email,password_hash,name,avatar_url,oidc_issuer,oidc_subject,role,last_login,created_at,updated_at
 		 FROM users WHERE id = ?`,
 		id,
 	)
@@ -390,7 +398,7 @@ func (s *UserStore) getByIDWithSecret(id string) (userWithSecret, bool, error) {
 func (s *UserStore) getByLoginWithSecret(login string) (userWithSecret, bool, error) {
 	login = normalizeLogin(login)
 	row := s.db.QueryRow(
-		`SELECT id,login,password_hash,name,avatar_url,oidc_issuer,oidc_subject,role,last_login,created_at,updated_at
+		`SELECT id,login,email,password_hash,name,avatar_url,oidc_issuer,oidc_subject,role,last_login,created_at,updated_at
 		 FROM users WHERE lower(login) = lower(?)`,
 		login,
 	)
@@ -404,6 +412,25 @@ func (s *UserStore) getByLoginWithSecret(login string) (userWithSecret, bool, er
 	return userWithSecret{User: u, PasswordHash: pw}, true, nil
 }
 
+func (s *UserStore) GetByEmail(email string) (User, bool, error) {
+	if email == "" {
+		return User{}, false, nil
+	}
+	row := s.db.QueryRow(
+		`SELECT id,login,email,password_hash,name,avatar_url,oidc_issuer,oidc_subject,role,last_login,created_at,updated_at
+		 FROM users WHERE lower(email) = lower(?)`,
+		email,
+	)
+	u, _, err := scanUser(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return User{}, false, nil
+	}
+	if err != nil {
+		return User{}, false, err
+	}
+	return u, true, nil
+}
+
 func (s *UserStore) GetByOIDC(issuer, subject string) (User, bool, error) {
 	issuer, subject, err := normalizeOIDC(issuer, subject)
 	if err != nil {
@@ -413,7 +440,7 @@ func (s *UserStore) GetByOIDC(issuer, subject string) (User, bool, error) {
 		return User{}, false, nil
 	}
 	row := s.db.QueryRow(
-		`SELECT id,login,password_hash,name,avatar_url,oidc_issuer,oidc_subject,role,last_login,created_at,updated_at
+		`SELECT id,login,email,password_hash,name,avatar_url,oidc_issuer,oidc_subject,role,last_login,created_at,updated_at
 		 FROM users WHERE oidc_issuer = ? AND oidc_subject = ?`,
 		issuer, subject,
 	)
@@ -495,9 +522,9 @@ func (s *UserStore) Create(input CreateUserInput) (User, error) {
 		UpdatedAt:   nowUTC(),
 	}
 	_, err = s.db.Exec(
-		`INSERT INTO users(id,login,password_hash,name,avatar_url,oidc_issuer,oidc_subject,role,last_login,created_at,updated_at)
-		 VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-		u.ID, u.Login, passwordHash, u.Name, u.AvatarURL, u.OIDCIssuer, u.OIDCSubject, u.Role, u.LastLogin, u.CreatedAt, u.UpdatedAt,
+		`INSERT INTO users(id,login,email,password_hash,name,avatar_url,oidc_issuer,oidc_subject,role,last_login,created_at,updated_at)
+		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+		u.ID, u.Login, u.Email, passwordHash, u.Name, u.AvatarURL, u.OIDCIssuer, u.OIDCSubject, u.Role, u.LastLogin, u.CreatedAt, u.UpdatedAt,
 	)
 	if err != nil {
 		return User{}, err
@@ -548,12 +575,13 @@ func (s *UserStore) Update(id string, input UpdateUserInput) (User, bool, error)
 	if name == "" {
 		name = login
 	}
+	email := strings.TrimSpace(input.Email)
 	ts := nowUTC()
 	res, err := s.db.Exec(
 		`UPDATE users
-		 SET login=?, name=?, avatar_url=?, oidc_issuer=?, oidc_subject=?, role=?, updated_at=?
+		 SET login=?, email=?, name=?, avatar_url=?, oidc_issuer=?, oidc_subject=?, role=?, updated_at=?
 		 WHERE id=?`,
-		login, name, avatarURL, issuer, subject, role, ts, id,
+		login, email, name, avatarURL, issuer, subject, role, ts, id,
 	)
 	if err != nil {
 		return User{}, false, err

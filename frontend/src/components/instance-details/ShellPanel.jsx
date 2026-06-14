@@ -264,7 +264,7 @@ export default function ShellPanel({
       {/* Terminal container */}
       <div
         ref={containerRef}
-        style={{ padding: '10px 6px', minHeight: 460 }}
+        className="shell-panel-container" style={{ padding: '10px 6px', minHeight: 460 }}
       />
     </div>
   )

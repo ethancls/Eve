@@ -2,7 +2,7 @@ const EMPTY_TABS = []
 
 export default function DetailsTabs({ tabs = EMPTY_TABS, value, onChange }) {
   return (
-    <div style={{
+    <div className="details-tabs-row" style={{
       display: 'flex',
       borderBottom: '1px solid var(--border)',
       marginBottom: 16,

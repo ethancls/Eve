@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/user/eve/internal/notify"
 	"github.com/user/eve/internal/store"
 )
 
@@ -64,8 +65,26 @@ func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
 	return true
 }
 
-func (srv *Server) logAction(action, vmName, status, errMsg string) {
-	if err := srv.activity.Add(action, vmName, status, errMsg); err != nil {
+func (srv *Server) buildSMTPConfig() notify.Config {
+	return notify.Config{
+		Host:     srv.appConfig.MustGet("smtp.host"),
+		Port:     atoiDefault(srv.appConfig.MustGet("smtp.port"), 587),
+		Username: srv.appConfig.MustGet("smtp.username"),
+		Password: srv.appConfig.MustGet("smtp.password"),
+		From:     srv.appConfig.MustGet("smtp.from"),
+		UseTLS:   srv.appConfig.MustGet("smtp.use_tls") != "false",
+		AppURL:   srv.cfg.AppURL,
+	}
+}
+
+func (srv *Server) logAction(r *http.Request, action, vmName, status, errMsg string) {
+	userID := ""
+	userLogin := ""
+	if user, ok := srv.sessionUser(r); ok {
+		userID = user.ID
+		userLogin = user.Login
+	}
+	if err := srv.activity.Add(userID, userLogin, action, vmName, status, errMsg, ""); err != nil {
 		srv.logger.Warn("activity log error", "err", err)
 	}
 }
@@ -196,14 +215,23 @@ func (srv *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 	// Build network → containers mapping from container network settings
 	allContainers, _ := srv.mp.ListContainers(ctx)
 	networkContainers := make(map[string][]string)
+	networkContainerDetails := make(map[string][]map[string]string)
 	for _, c := range allContainers {
 		name := "unknown"
 		if len(c.Names) > 0 {
 			name = strings.TrimPrefix(c.Names[0], "/")
 		}
 		if c.NetworkSettings != nil {
-			for netName := range c.NetworkSettings.Networks {
+			for netName, endpoint := range c.NetworkSettings.Networks {
 				networkContainers[netName] = append(networkContainers[netName], name)
+				ipv4 := ""
+				if endpoint != nil {
+					ipv4 = endpoint.IPAddress
+				}
+				networkContainerDetails[netName] = append(networkContainerDetails[netName], map[string]string{
+					"name":         name,
+					"ipv4_address": ipv4,
+				})
 			}
 		}
 	}
@@ -212,35 +240,51 @@ func (srv *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 	for _, n := range nets {
 		ipv4Subnet := ""
 		ipv4Gateway := ""
+		ipv4IPRange := ""
 		if len(n.IPAM.Config) > 0 {
 			ipv4Subnet = n.IPAM.Config[0].Subnet
 			ipv4Gateway = n.IPAM.Config[0].Gateway
+			ipv4IPRange = n.IPAM.Config[0].IPRange
 		}
 
 		// Prefer API containers, fallback to container network mapping
 		var instances []string
+		var containerDetails []map[string]string
 		if n.Containers != nil {
 			for _, containerInfo := range n.Containers {
 				instances = append(instances, containerInfo.Name)
+				containerDetails = append(containerDetails, map[string]string{
+					"name":         containerInfo.Name,
+					"ipv4_address": containerInfo.IPv4Address,
+				})
 			}
 		}
 		if len(instances) == 0 {
 			instances = networkContainers[n.Name]
+			containerDetails = networkContainerDetails[n.Name]
 		}
 		if instances == nil {
 			instances = []string{}
 		}
+		if containerDetails == nil {
+			containerDetails = []map[string]string{}
+		}
 
 		results = append(results, map[string]any{
-			"name":         n.Name,
-			"mode":         n.Driver,
-			"type":         n.Scope,
-			"plugin":       n.Driver,
-			"status":       "up",
-			"ipv4_subnet":  ipv4Subnet,
-			"ipv4_gateway": ipv4Gateway,
-			"containers":   instances,
-			"instances":    instances,
+			"name":              n.Name,
+			"mode":              n.Driver,
+			"type":              n.Driver,
+			"scope":             n.Scope,
+			"driver":            n.Driver,
+			"network_type":      n.Driver,
+			"plugin":            n.Driver,
+			"status":            "up",
+			"ipv4_subnet":       ipv4Subnet,
+			"ipv4_gateway":      ipv4Gateway,
+			"ipv4_ip_range":     ipv4IPRange,
+			"containers":        instances,
+			"containers_detail": containerDetails,
+			"instances":         instances,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"networks": results})
@@ -314,13 +358,13 @@ func (srv *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) 
 
 	_, err := srv.mp.RunChecked(r.Context(), "machine create", []string{body.Image}, opts, "")
 	if err != nil {
-		srv.logAction("machine create", body.Name, "error", err.Error())
+		srv.logAction(r, "machine create", body.Name, "error", err.Error())
 		writeJSON(w, httpStatusFromError(err.Error()), map[string]string{"error": err.Error()})
 		return
 	}
 	srv.mp.InvalidateCache()
-	srv.logAction("machine create", body.Name, "success", "")
-	writeJSON(w, http.StatusOK, map[string]string{"status": "success", "error": ""})
+	srv.logAction(r, "machine create", body.Name, "ok", "")
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "error": ""})
 }
 
 // --- GET /api/instances/{name} ---
@@ -382,13 +426,13 @@ func (srv *Server) handleInstanceAction(w http.ResponseWriter, r *http.Request, 
 	}
 	_, err := srv.mp.RunChecked(ctx, command, []string{name}, opts, "")
 	if err != nil {
-		srv.logAction(action, name, "error", err.Error())
+		srv.logAction(r, action, name, "error", err.Error())
 		writeJSON(w, httpStatusFromError(err.Error()), map[string]string{"error": err.Error()})
 		return
 	}
 	srv.mp.InvalidateCache()
-	srv.logAction(action, name, "success", "")
-	writeJSON(w, http.StatusOK, map[string]string{"status": "success", "error": ""})
+	srv.logAction(r, action, name, "ok", "")
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "error": ""})
 }
 
 // --- POST /api/instances/{name}/clone ---
@@ -411,13 +455,13 @@ func (srv *Server) handleCloneInstance(w http.ResponseWriter, r *http.Request, n
 	ctx := r.Context()
 	_, err := srv.mp.RunChecked(ctx, "clone", []string{name}, opts, "")
 	if err != nil {
-		srv.logAction("clone", name, "error", err.Error())
+		srv.logAction(r, "clone", name, "error", err.Error())
 		writeJSON(w, httpStatusFromError(err.Error()), map[string]string{"error": err.Error()})
 		return
 	}
 	srv.mp.InvalidateCache()
-	srv.logAction("clone", name, "success", "")
-	writeJSON(w, http.StatusOK, map[string]string{"status": "success", "error": ""})
+	srv.logAction(r, "clone", name, "ok", "")
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "error": ""})
 }
 
 // --- POST /api/instances/{name}/exec ---
@@ -493,7 +537,7 @@ func (srv *Server) handleSSHPassword(w http.ResponseWriter, r *http.Request, nam
 		body.Username+":"+password+"\n",
 	)
 	if err != nil {
-		srv.logAction("ssh_password", name, "error", err.Error())
+		srv.logAction(r, "ssh_password", name, "error", err.Error())
 		writeJSON(w, httpStatusFromError(err.Error()), map[string]string{"error": err.Error()})
 		return
 	}
@@ -522,9 +566,9 @@ func (srv *Server) handleSSHPassword(w http.ResponseWriter, r *http.Request, nam
 		sshCmd = fmt.Sprintf("ssh %s@<instance-ip>", body.Username)
 	}
 
-	srv.logAction("ssh_password", name, "success", "")
+	srv.logAction(r, "ssh_password", name, "ok", "")
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":      "success",
+		"status":      "ok",
 		"instance":    name,
 		"username":    body.Username,
 		"host":        host,
@@ -568,7 +612,7 @@ func (srv *Server) handleSSHPasswordStatus(w http.ResponseWriter, r *http.Reques
 
 	if state != "Running" {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"status":         "success",
+			"status":         "ok",
 			"instance":       name,
 			"username":       username,
 			"host":           host,
@@ -587,7 +631,7 @@ func (srv *Server) handleSSHPasswordStatus(w http.ResponseWriter, r *http.Reques
 		[]string{name, "--", "bash", "-lc", script}, nil, "")
 	if perr != nil {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"status":         "success",
+			"status":         "ok",
 			"instance":       name,
 			"username":       username,
 			"host":           host,
@@ -607,7 +651,7 @@ func (srv *Server) handleSSHPasswordStatus(w http.ResponseWriter, r *http.Reques
 	enabled := passwordAuth && !accountLocked
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":         "success",
+		"status":         "ok",
 		"instance":       name,
 		"username":       username,
 		"host":           host,
@@ -649,7 +693,7 @@ func (srv *Server) handleSSHPasswordDisable(w http.ResponseWriter, r *http.Reque
 			"sudo systemctl restart ssh || sudo systemctl restart sshd; " +
 			"else sudo service ssh restart || sudo service sshd restart; fi"
 		if _, err := srv.mp.RunChecked(ctx, "exec", []string{name, "--", "bash", "-lc", script}, nil, ""); err != nil {
-			srv.logAction("ssh_password_disable", name, "error", err.Error())
+			srv.logAction(r, "ssh_password_disable", name, "error", err.Error())
 			writeJSON(w, httpStatusFromError(err.Error()), map[string]string{"error": err.Error()})
 			return
 		}
@@ -658,14 +702,14 @@ func (srv *Server) handleSSHPasswordDisable(w http.ResponseWriter, r *http.Reque
 	if body.LockPassword {
 		script := "sudo passwd -l " + shellQuote(body.Username)
 		if _, err := srv.mp.RunChecked(ctx, "exec", []string{name, "--", "bash", "-lc", script}, nil, ""); err != nil {
-			srv.logAction("ssh_password_disable", name, "error", err.Error())
+			srv.logAction(r, "ssh_password_disable", name, "error", err.Error())
 			writeJSON(w, httpStatusFromError(err.Error()), map[string]string{"error": err.Error()})
 			return
 		}
 	}
 
-	srv.logAction("ssh_password_disable", name, "success", "")
-	writeJSON(w, http.StatusOK, map[string]string{"status": "success", "error": ""})
+	srv.logAction(r, "ssh_password_disable", name, "ok", "")
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "error": ""})
 }
 
 // --- POST /api/instances/{name}/updates/run ---
@@ -718,7 +762,7 @@ func (srv *Server) handleRunUpdates(w http.ResponseWriter, r *http.Request, name
 	defer cancel()
 
 	if _, err := srv.mp.RunChecked(ctx2, "exec", []string{name, "--", "bash", "-lc", script}, nil, ""); err != nil {
-		srv.logAction("updates_run", name, "error", err.Error())
+		srv.logAction(r, "updates_run", name, "error", err.Error())
 		writeJSON(w, httpStatusFromError(err.Error()), map[string]string{"error": err.Error()})
 		return
 	}
@@ -728,9 +772,9 @@ func (srv *Server) handleRunUpdates(w http.ResponseWriter, r *http.Request, name
 		[]string{name, "--", "bash", "-lc", probeUpdatesScript()},
 		nil, "")
 	if probeErr != nil {
-		srv.logAction("updates_run", name, "success", "")
+		srv.logAction(r, "updates_run", name, "ok", "")
 		writeJSON(w, http.StatusOK, map[string]any{
-			"status":   "success",
+			"status":   "ok",
 			"instance": name,
 			"mode":     mode,
 			"note":     "System packages upgraded successfully",
@@ -745,9 +789,9 @@ func (srv *Server) handleRunUpdates(w http.ResponseWriter, r *http.Request, name
 		note = fmt.Sprintf("Update command completed, %d package(s) still pending", upgradable)
 	}
 
-	srv.logAction("updates_run", name, "success", "")
+	srv.logAction(r, "updates_run", name, "ok", "")
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":               "success",
+		"status":               "ok",
 		"instance":             name,
 		"mode":                 mode,
 		"note":                 note,
@@ -906,13 +950,13 @@ func (srv *Server) handleMount(w http.ResponseWriter, r *http.Request, name stri
 		target = name + ":" + body.Path
 	}
 	if _, err := srv.mp.RunChecked(r.Context(), "mount", []string{body.Source, target}, opts, ""); err != nil {
-		srv.logAction("mount", name, "error", err.Error())
+		srv.logAction(r, "mount", name, "error", err.Error())
 		writeJSON(w, httpStatusFromError(err.Error()), map[string]string{"error": err.Error()})
 		return
 	}
 	srv.mp.InvalidateCache()
-	srv.logAction("mount", name, "success", "")
-	writeJSON(w, http.StatusOK, map[string]string{"status": "success", "error": ""})
+	srv.logAction(r, "mount", name, "ok", "")
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "error": ""})
 }
 
 // --- DELETE /api/instances/{name}/mounts ---
@@ -928,13 +972,13 @@ func (srv *Server) handleUmount(w http.ResponseWriter, r *http.Request, name str
 		target = name + ":" + path
 	}
 	if _, err := srv.mp.RunChecked(r.Context(), "umount", []string{target}, nil, ""); err != nil {
-		srv.logAction("umount", name, "error", err.Error())
+		srv.logAction(r, "umount", name, "error", err.Error())
 		writeJSON(w, httpStatusFromError(err.Error()), map[string]string{"error": err.Error()})
 		return
 	}
 	srv.mp.InvalidateCache()
-	srv.logAction("umount", name, "success", "")
-	writeJSON(w, http.StatusOK, map[string]string{"status": "success", "error": ""})
+	srv.logAction(r, "umount", name, "ok", "")
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "error": ""})
 }
 
 // --- GET /api/instances/{name}/snapshots ---
@@ -1002,13 +1046,13 @@ func (srv *Server) handleCreateSnapshot(w http.ResponseWriter, r *http.Request, 
 	}
 
 	if _, err := srv.mp.RunChecked(r.Context(), "snapshot", []string{name}, opts, ""); err != nil {
-		srv.logAction("snapshot", name, "error", err.Error())
+		srv.logAction(r, "snapshot", name, "error", err.Error())
 		writeJSON(w, httpStatusFromError(err.Error()), map[string]string{"error": err.Error()})
 		return
 	}
 	srv.mp.InvalidateCache()
-	srv.logAction("snapshot", name, "success", "")
-	writeJSON(w, http.StatusOK, map[string]string{"status": "success", "error": ""})
+	srv.logAction(r, "snapshot", name, "ok", "")
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "error": ""})
 }
 
 // --- GET /api/instances/{name}/history ---
@@ -1076,18 +1120,18 @@ func (srv *Server) handleRestoreSnapshot(w http.ResponseWriter, r *http.Request,
 		if !body.Destructive && needsDestructive {
 			if _, retryErr := srv.mp.RunChecked(r.Context(), "restore", []string{ref}, map[string]any{"--destructive": true}, ""); retryErr == nil {
 				srv.mp.InvalidateCache()
-				srv.logAction("restore", instance, "success", "")
-				writeJSON(w, http.StatusOK, map[string]string{"status": "success", "error": ""})
+				srv.logAction(r, "restore", instance, "ok", "")
+				writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "error": ""})
 				return
 			}
 		}
-		srv.logAction("restore", instance, "error", err.Error())
+		srv.logAction(r, "restore", instance, "error", err.Error())
 		writeJSON(w, httpStatusFromError(err.Error()), map[string]string{"error": err.Error()})
 		return
 	}
 	srv.mp.InvalidateCache()
-	srv.logAction("restore", instance, "success", "")
-	writeJSON(w, http.StatusOK, map[string]string{"status": "success", "error": ""})
+	srv.logAction(r, "restore", instance, "ok", "")
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "error": ""})
 }
 
 // --- DELETE /api/snapshots/{instance}/{snapshot} ---
@@ -1099,13 +1143,13 @@ func (srv *Server) handleDeleteSnapshot(w http.ResponseWriter, r *http.Request, 
 	}
 	ref := instance + "." + snapshot
 	if _, err := srv.mp.RunChecked(r.Context(), "delete", []string{ref}, map[string]any{"--purge": true}, ""); err != nil {
-		srv.logAction("delete_snapshot", instance, "error", err.Error())
+		srv.logAction(r, "delete_snapshot", instance, "error", err.Error())
 		writeJSON(w, httpStatusFromError(err.Error()), map[string]string{"error": err.Error()})
 		return
 	}
 	srv.mp.InvalidateCache()
-	srv.logAction("delete_snapshot", instance, "success", "")
-	writeJSON(w, http.StatusOK, map[string]string{"status": "success", "error": ""})
+	srv.logAction(r, "delete_snapshot", instance, "ok", "")
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "error": ""})
 }
 
 // --- POST /api/transfers ---
@@ -1133,12 +1177,12 @@ func (srv *Server) handleTransfer(w http.ResponseWriter, r *http.Request) {
 	}
 	args := append(body.Sources, body.Destination)
 	if _, err := srv.mp.RunChecked(r.Context(), "transfer", args, opts, ""); err != nil {
-		srv.logAction("transfer", "", "error", err.Error())
+		srv.logAction(r, "transfer", "", "error", err.Error())
 		writeJSON(w, httpStatusFromError(err.Error()), map[string]string{"error": err.Error()})
 		return
 	}
-	srv.logAction("transfer", "", "success", "")
-	writeJSON(w, http.StatusOK, map[string]string{"status": "success", "error": ""})
+	srv.logAction(r, "transfer", "", "ok", "")
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "error": ""})
 }
 
 // --- GET /api/aliases ---
@@ -1195,12 +1239,12 @@ func (srv *Server) handleCreateAlias(w http.ResponseWriter, r *http.Request) {
 		opts["--no-map-working-directory"] = true
 	}
 	if _, err := srv.mp.RunChecked(r.Context(), "alias", args, opts, ""); err != nil {
-		srv.logAction("alias", "", "error", err.Error())
+		srv.logAction(r, "alias", "", "error", err.Error())
 		writeJSON(w, httpStatusFromError(err.Error()), map[string]string{"error": err.Error()})
 		return
 	}
-	srv.logAction("alias", "", "success", "")
-	writeJSON(w, http.StatusOK, map[string]string{"status": "success", "error": ""})
+	srv.logAction(r, "alias", "", "ok", "")
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "error": ""})
 }
 
 // --- DELETE /api/aliases/{name} ---
@@ -1211,12 +1255,12 @@ func (srv *Server) handleDeleteAlias(w http.ResponseWriter, r *http.Request, nam
 		return
 	}
 	if _, err := srv.mp.RunChecked(r.Context(), "unalias", []string{name}, nil, ""); err != nil {
-		srv.logAction("unalias", "", "error", err.Error())
+		srv.logAction(r, "unalias", "", "error", err.Error())
 		writeJSON(w, httpStatusFromError(err.Error()), map[string]string{"error": err.Error()})
 		return
 	}
-	srv.logAction("unalias", "", "success", "")
-	writeJSON(w, http.StatusOK, map[string]string{"status": "success", "error": ""})
+	srv.logAction(r, "unalias", "", "ok", "")
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "error": ""})
 }
 
 // --- POST /api/aliases/prefer ---
@@ -1236,7 +1280,7 @@ func (srv *Server) handlePreferAlias(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, httpStatusFromError(err.Error()), map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "success", "error": ""})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "error": ""})
 }
 
 // --- GET /api/settings/keys ---
@@ -1349,10 +1393,12 @@ func (srv *Server) handlePutSetting(w http.ResponseWriter, r *http.Request, key 
 		return
 	}
 	if err := srv.appConfig.Set(key, body.Value); err != nil {
+		srv.logAction(r, "setting update", key, "error", err.Error())
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "success", "error": ""})
+	srv.logAction(r, "setting update", key, "ok", "")
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "error": ""})
 }
 
 // --- GET /api/activity ---
@@ -1363,16 +1409,25 @@ func (srv *Server) handleGetActivity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	limit := 100
+	filter := store.ActivityFilter{Limit: 50}
 	if s := q.Get("limit"); s != "" {
 		if n, err := strconv.Atoi(s); err == nil && n > 0 {
-			limit = n
+			filter.Limit = n
 		}
 	}
-	action := q.Get("action")
-	vmName := q.Get("vm_name")
+	if s := q.Get("offset"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n >= 0 {
+			filter.Offset = n
+		}
+	}
+	filter.Action = q.Get("action")
+	filter.VMName = q.Get("vm_name")
+	filter.Status = q.Get("status")
+	filter.UserID = q.Get("user_id")
+	filter.Since = q.Get("since")
+	filter.Until = q.Get("until")
 
-	records, err := srv.activity.List(limit, action, vmName)
+	records, total, err := srv.activity.Query(filter)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -1380,7 +1435,7 @@ func (srv *Server) handleGetActivity(w http.ResponseWriter, r *http.Request) {
 	if records == nil {
 		records = []store.ActivityRecord{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"activity": records})
+	writeJSON(w, http.StatusOK, map[string]any{"activity": records, "total": total})
 }
 
 // --- GET /api/stats ---
@@ -1529,7 +1584,7 @@ func (srv *Server) handleDeleteTemplate(w http.ResponseWriter, r *http.Request, 
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "template not found"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "success", "error": ""})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "error": ""})
 }
 
 // --- helpers ---
@@ -1896,4 +1951,97 @@ func generatePassword(length int) string {
 		b[i] = passwordAlphabet[int(c)%len(passwordAlphabet)]
 	}
 	return string(b)
+}
+
+// --- Notification preferences ---
+
+func (srv *Server) routeNotifications(w http.ResponseWriter, r *http.Request) {
+	// Path: /api/settings/notifications/{user_id}
+	path := strings.TrimPrefix(r.URL.Path, "/api/settings/notifications/")
+	userID := strings.Split(path, "/")[0]
+	if userID == "" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "user id required"})
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		prefs := map[string]string{
+			"login_alert":         srv.appConfig.MustGet("notif." + userID + ".login_alert"),
+			"container_update":    srv.appConfig.MustGet("notif." + userID + ".container_update"),
+			"suspicious_activity": srv.appConfig.MustGet("notif." + userID + ".suspicious_activity"),
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"preferences": prefs})
+	case http.MethodPut:
+		var body struct {
+			LoginAlert         bool `json:"login_alert"`
+			ContainerUpdate    bool `json:"container_update"`
+			SuspiciousActivity bool `json:"suspicious_activity"`
+		}
+		if !decodeBody(w, r, &body) {
+			return
+		}
+		_ = srv.appConfig.Set("notif."+userID+".login_alert", boolStr(body.LoginAlert))
+		_ = srv.appConfig.Set("notif."+userID+".container_update", boolStr(body.ContainerUpdate))
+		_ = srv.appConfig.Set("notif."+userID+".suspicious_activity", boolStr(body.SuspiciousActivity))
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+// --- POST /api/settings/test-smtp ---
+
+func (srv *Server) handleTestSMTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	var body struct {
+		To string `json:"to"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	if body.To == "" {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "recipient email is required"})
+		return
+	}
+
+	cfg := notify.Config{
+		Host:     srv.appConfig.MustGet("smtp.host"),
+		Port:     atoiDefault(srv.appConfig.MustGet("smtp.port"), 587),
+		Username: srv.appConfig.MustGet("smtp.username"),
+		Password: srv.appConfig.MustGet("smtp.password"),
+		From:     srv.appConfig.MustGet("smtp.from"),
+		UseTLS:   srv.appConfig.MustGet("smtp.use_tls") != "false",
+		AppURL:   srv.cfg.AppURL,
+	}
+
+	if cfg.Host == "" {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "SMTP host not configured"})
+		return
+	}
+
+	if err := notify.SendTestEmail(cfg, body.To); err != nil {
+		srv.logAction(r, "test smtp", body.To, "error", err.Error())
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	srv.logAction(r, "test smtp", body.To, "ok", "")
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func atoiDefault(s string, def int) int {
+	if s == "" { return def }
+	n, err := strconv.Atoi(s)
+	if err != nil { return def }
+	return n
+}
+
+func boolStr(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
 }

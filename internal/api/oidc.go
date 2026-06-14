@@ -300,6 +300,21 @@ func (srv *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		srv.redirectOIDCError(w, r, "failed to match OIDC user")
 		return
 	}
+	oidcEmail := strings.TrimSpace(stringClaim(claims, "email"))
+	if !found {
+		// Try matching by email before creating a new user
+		if oidcEmail != "" {
+			if existingUser, ok, _ := srv.users.GetByEmail(oidcEmail); ok {
+				srv.users.Update(existingUser.ID, store.UpdateUserInput{
+					Login: existingUser.Login, Email: oidcEmail,
+					Name: existingUser.Name, AvatarURL: existingUser.AvatarURL,
+					OIDCIssuer: issuer, OIDCSubject: subject, Role: existingUser.Role,
+				})
+				user = existingUser
+				found = true
+			}
+		}
+	}
 	if !found {
 		login, err := srv.deriveUniqueOIDCLogin(rt.settings, claims, subject)
 		if err != nil {
@@ -311,6 +326,7 @@ func (srv *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		user, err = srv.users.Create(store.CreateUserInput{
 			Login:       login,
 			Password:    "",
+			Email:       oidcEmail,
 			Name:        name,
 			AvatarURL:   avatar,
 			OIDCIssuer:  issuer,
@@ -344,6 +360,7 @@ func (srv *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = srv.users.TouchLastLogin(user.ID)
+	srv.sendLoginAlert(user, r.Header.Get("X-Forwarded-For"), r.Header.Get("User-Agent"))
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 

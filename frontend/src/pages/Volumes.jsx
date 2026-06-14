@@ -1,13 +1,12 @@
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Trash2 } from 'lucide-react'
+import { Database, Trash2 } from 'lucide-react'
 import { toast } from '../toast'
 import ContainerDataTable from '../components/ContainerDataTable'
 import ConfirmModal from '../components/ConfirmModal'
 import ResourceActionButton from '../components/ResourceActionButton'
 import { api } from '../api/client'
 import { SkeletonTable } from '../components/Skeletons'
-import BrandIcon from '../components/BrandIcon'
 import CustomSelect from '../components/CustomSelect'
 import TableToolbar from '../components/TableToolbar'
 import { useColumnVisibility } from '../hooks/useColumnVisibility'
@@ -26,15 +25,10 @@ function fmtSize(bytes) {
 
 function volumeName(item) {
   const name = item.name || '-'
+  const used = usageState(item) === 'used'
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-      <div style={{
-        width: 28, height: 28, borderRadius: 6, background: 'var(--card-2)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        border: '1px solid var(--border)', flexShrink: 0
-      }}>
-        <BrandIcon name={name} type="volume" size={16} />
-      </div>
+      <Database size={18} color={used ? 'var(--accent)' : '#7f9bb8'} style={{ flexShrink: 0 }} />
       <span className="mono" style={{ fontSize: 13, fontWeight: 600, color: 'var(--accent)' }}>{name}</span>
     </div>
   )
@@ -50,8 +44,8 @@ function UsageBadge({ value }) {
   return (
     <span className="badge" style={{
       background: used ? 'var(--accent-dim)' : 'var(--card-2)',
-      color: used ? 'var(--accent)' : 'var(--text-muted)',
-      borderColor: used ? 'var(--accent-border)' : 'var(--border)',
+      color: used ? 'var(--accent)' : '#7f9bb8',
+      borderColor: used ? 'var(--accent-border)' : 'rgba(127, 155, 184, 0.26)',
       textTransform: 'uppercase',
     }}>
       {used ? 'Used' : 'Unused'}
@@ -140,16 +134,19 @@ export default function Volumes() {
           items={filtered}
           empty={query.trim() ? `No volumes match "${query}"` : 'No volumes available'}
           columns={visibleColumns}
-          renderActions={(item) => (
-            <div style={{ display: 'inline-flex', gap: 4 }}>
-              <ResourceActionButton
-                icon={<Trash2 size={14} />}
-                label="Delete"
-                color="var(--stopped)"
-                onClick={() => setDeleteName(item.name)}
-              />
-            </div>
-          )}
+          renderActions={(item) => {
+            if (usageState(item) === 'used') return null
+            return (
+              <div style={{ display: 'inline-flex', gap: 4 }}>
+                <ResourceActionButton
+                  icon={<Trash2 size={14} />}
+                  label="Delete"
+                  color="var(--stopped)"
+                  onClick={() => setDeleteName(item.name)}
+                />
+              </div>
+            )
+          }}
         />
       )}
 

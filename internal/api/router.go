@@ -15,6 +15,7 @@ import (
 	"github.com/user/eve/internal/config"
 	"github.com/user/eve/internal/docker"
 	"github.com/user/eve/internal/store"
+	"github.com/user/eve/internal/webauthn"
 )
 
 // Server holds all dependencies for the HTTP server.
@@ -29,11 +30,13 @@ type Server struct {
 	jwtSecret []byte
 	hub       *WSHub
 	shells    *shellSessionManager
+	wa        *webauthn.Service
+	waStore   *store.WebAuthnStore
 	logger    *slog.Logger
 }
 
 // New creates a new Server.
-func New(cfg config.Config, mp *docker.Client, activity *store.ActivityStore, templates *store.TemplateStore, metrics *store.MetricsStore, users *store.UserStore, appConfig *store.AppSettingsStore, logger *slog.Logger) *Server {
+func New(cfg config.Config, mp *docker.Client, activity *store.ActivityStore, templates *store.TemplateStore, metrics *store.MetricsStore, users *store.UserStore, appConfig *store.AppSettingsStore, waService *webauthn.Service, waStore *store.WebAuthnStore, logger *slog.Logger) *Server {
 	srv := &Server{
 		cfg:       cfg,
 		mp:        mp,
@@ -42,11 +45,13 @@ func New(cfg config.Config, mp *docker.Client, activity *store.ActivityStore, te
 		metrics:   metrics,
 		users:     users,
 		appConfig: appConfig,
+		wa:        waService,
+		waStore:   waStore,
 		jwtSecret: []byte(cfg.JWTSecret),
 		logger:    logger,
 	}
 	srv.hub = newWSHub(logger)
-	srv.shells = newShellSessionManager(logger, cfg.ContainerBinary)
+	srv.shells = newShellSessionManager(logger, "docker")
 	return srv
 }
 
@@ -65,6 +70,10 @@ func (srv *Server) Build(frontendFS embed.FS) http.Handler {
 	mux.HandleFunc("/auth/oidc/start", srv.handleOIDCStart)
 	mux.HandleFunc("/auth/oidc/callback", srv.handleOIDCCallback)
 	mux.HandleFunc("/auth/logout", srv.handleLogout)
+	mux.HandleFunc("/auth/forgot-password", srv.handleForgotPassword)
+	mux.HandleFunc("/auth/reset-password", srv.handleResetPassword)
+	mux.HandleFunc("/auth/passkeys/login/begin", srv.handlePasskeysLoginBegin)
+	mux.HandleFunc("/auth/passkeys/login/finish", srv.handlePasskeysLoginFinish)
 	mux.HandleFunc("/auth/me", srv.handleMe)
 
 	// WebSocket (session required)
@@ -109,9 +118,13 @@ func (srv *Server) Build(frontendFS embed.FS) http.Handler {
 	apiMux.HandleFunc("/api/projects/", srv.routeProjects)
 	apiMux.HandleFunc("/api/containers/", srv.routeContainers)
 	apiMux.HandleFunc("/api/machines/", srv.routeMachines)
+	apiMux.HandleFunc("/api/settings/notifications/", srv.routeNotifications)
+	apiMux.HandleFunc("/api/settings/test-smtp", srv.handleTestSMTP)
 	apiMux.HandleFunc("/api/settings/", srv.routeSettings)
 	apiMux.HandleFunc("/api/templates/", srv.routeTemplateDelete)
 	apiMux.HandleFunc("/api/instances/", srv.routeInstances)
+		apiMux.HandleFunc("/api/users/me/passkeys/", srv.routeMyPasskeys)
+		apiMux.HandleFunc("/api/users/me/passkeys/register/", srv.routeRegisterPasskey)
 	apiMux.HandleFunc("/api/users/", srv.routeUsers)
 
 	mux.Handle("/api/", srv.requireSession(apiMux))

@@ -77,10 +77,10 @@ export function useInstances() {
 
   const query = useQuery({
     queryKey: ['instances'],
-    queryFn: () => api.getInstances(),
+    queryFn: () => api.getContainers(),
     refetchInterval: 10000,
   })
 
-  const instances = wsInstances ?? query.data?.instances ?? []
+  const instances = wsInstances ?? query.data?.containers ?? []
   return { instances, isLoading: query.isLoading, error: query.error, refetch: query.refetch }
 }

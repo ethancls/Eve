@@ -3,51 +3,153 @@ import { useQuery } from '@tanstack/react-query'
 import { Network } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
-import CustomSelect from '../components/CustomSelect'
+import Tooltip from '../components/Tooltip'
 import { SkeletonTable } from '../components/Skeletons'
-import BrandIcon from '../components/BrandIcon'
 import ContainerDataTable from '../components/ContainerDataTable'
 import TableToolbar from '../components/TableToolbar'
 import { useColumnVisibility } from '../hooks/useColumnVisibility'
 
-function StatusBadge({ status }) {
-  const cfg = {
-    up:      { bg: 'transparent',            color: 'var(--running)',    border: 'var(--accent-border)', dot: 'var(--running)' },
-    configured: { bg: 'transparent',         color: 'var(--accent)',      border: 'var(--accent-border)', dot: 'var(--accent)' },
-    down:    { bg: 'var(--card-2)',          color: 'var(--text-muted)', border: 'var(--border)',         dot: 'var(--text-muted)' },
-    unknown: { bg: 'var(--card-2)',          color: 'var(--text-muted)', border: 'var(--border)',         dot: 'var(--text-muted)' },
-  }[status] || { bg: 'var(--card-2)', color: 'var(--text-muted)', border: 'var(--border)', dot: 'var(--text-muted)' }
+const DRIVER_TONES = {
+  bridge: { color: '#ff8ccf', bg: 'rgba(255, 140, 207, 0.13)', border: 'rgba(255, 140, 207, 0.34)' },
+  host: { color: '#a78bfa', bg: 'rgba(167, 139, 250, 0.14)', border: 'rgba(167, 139, 250, 0.34)' },
+  null: { color: 'var(--text-muted)', bg: 'var(--card-2)', border: 'var(--border)' },
+  none: { color: 'var(--text-muted)', bg: 'var(--card-2)', border: 'var(--border)' },
+  unused: { color: '#7f9bb8', bg: 'rgba(127, 155, 184, 0.12)', border: 'rgba(127, 155, 184, 0.26)' },
+}
 
+const FALLBACK_COLORS = ['#6fa8ff', '#22c55e', '#f59e0b', '#06b6d4', '#f97316', '#ec4899']
+
+function driverOf(item) {
+  return String(item.driver || item.network_type || item.mode || item.type || 'unknown').toLowerCase()
+}
+
+function toneForDriver(driver) {
+  const key = String(driver || 'unknown').toLowerCase()
+  if (DRIVER_TONES[key]) return DRIVER_TONES[key]
+  let hash = 0
+  for (const char of key) hash = (hash + char.charCodeAt(0)) % FALLBACK_COLORS.length
+  const color = FALLBACK_COLORS[hash]
+  return { color, bg: `color-mix(in srgb, ${color} 14%, transparent)`, border: `color-mix(in srgb, ${color} 34%, transparent)` }
+}
+
+function TypeBadge({ driver }) {
+  const tone = toneForDriver(driver)
   return (
-    <span className="badge" style={{ background: cfg.bg, color: cfg.color, borderColor: cfg.border }}>
-      <span className="badge-dot" style={{ background: cfg.dot }} />
-      {status === 'down' ? 'inactive' : status}
+    <span className="badge" style={{ background: tone.bg, color: tone.color, borderColor: tone.border, textTransform: 'uppercase' }}>
+      {driver || '-'}
     </span>
   )
 }
 
-function ContainerPills({ names, max = 3 }) {
+function UsageBadge({ value }) {
+  const used = value === 'used'
+  const tone = used ? { bg: 'var(--accent-dim)', color: 'var(--accent)', border: 'var(--accent-border)' } : DRIVER_TONES.unused
+  return (
+    <span className="badge" style={{
+      background: tone.bg,
+      color: tone.color,
+      borderColor: tone.border,
+      textTransform: 'uppercase',
+    }}>
+      {used ? 'Used' : 'Unused'}
+    </span>
+  )
+}
+
+function usageState(item) {
+  const names = item.containers || item.instances || []
+  return names.length > 0 ? 'used' : 'unused'
+}
+
+function ipToInt(ip) {
+  const parts = String(ip || '').split('.').map((part) => Number(part))
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return null
+  return (((parts[0] * 256 + parts[1]) * 256 + parts[2]) * 256 + parts[3]) >>> 0
+}
+
+function intToIp(value) {
+  const n = Number(value) >>> 0
+  return [
+    Math.floor(n / 16777216) % 256,
+    Math.floor(n / 65536) % 256,
+    Math.floor(n / 256) % 256,
+    n % 256,
+  ].join('.')
+}
+
+function usableRange(cidr) {
+  const [ip, prefixRaw] = String(cidr || '').split('/')
+  const prefix = Number(prefixRaw)
+  const base = ipToInt(ip)
+  if (base == null || !Number.isInteger(prefix) || prefix < 0 || prefix > 32 || prefix >= 31) return null
+  const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0
+  const network = (base & mask) >>> 0
+  const broadcast = (network | (~mask >>> 0)) >>> 0
+  const first = network + 1
+  const last = broadcast - 1
+  if (first > last) return null
+  return `${intToIp(first)} -> ${intToIp(last)}`
+}
+
+function ipv4Only(value) {
+  return String(value || '').split('/')[0] || ''
+}
+
+function SubnetPopover({ item }) {
+  const subnet = item.ipv4_subnet || item.address || ''
+  if (!subnet) return <span style={{ color: 'var(--text-muted)' }}>-</span>
+  const gateway = ipv4Only(item.ipv4_gateway)
+  const range = usableRange(item.ipv4_ip_range || subnet)
+  const label = (
+    <span style={{ display: 'grid', gap: 6, minWidth: 210, whiteSpace: 'normal', lineHeight: 1.25 }}>
+      <span><span style={{ color: 'var(--text-muted)' }}>Subnet</span> <span style={{ color: 'var(--text-primary)' }}>{subnet}</span></span>
+      <span><span style={{ color: 'var(--text-muted)' }}>Gateway</span> <span style={{ color: 'var(--text-primary)' }}>{gateway || '-'}</span>{gateway ? <span style={{ color: 'var(--text-muted)' }}> reserved</span> : null}</span>
+      <span><span style={{ color: 'var(--text-muted)' }}>Assignable</span> <span style={{ color: 'var(--text-primary)' }}>{range || '-'}</span></span>
+    </span>
+  )
+  return (
+    <Tooltip label={label}>
+      <span className="mono" style={{ fontSize: 12, color: 'var(--text-primary)', cursor: 'help' }}>{subnet}</span>
+    </Tooltip>
+  )
+}
+
+function ContainerPills({ item, max = 3 }) {
   const [expanded, setExpanded] = useState(false)
-  if (!names || !names.length) return <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>—</span>
+  const names = item.containers || item.instances || []
+  const details = item.containers_detail || []
+  const detailByName = new Map(details.map((detail) => [detail.name, detail]))
+  if (!names.length) return <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>-</span>
   const visible = expanded ? names : names.slice(0, max)
   const hidden = names.length - max
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
-      {visible.map((name) => (
-        <Link
-          key={name}
-          to={`/containers/${encodeURIComponent(name)}`}
-          className="mono"
-          style={{
-            fontSize: 11, fontWeight: 700,
-            background: 'var(--accent-dim)', color: 'var(--accent)',
-            border: '1px solid var(--accent-border)', borderRadius: 6,
-            padding: '2px 7px', textDecoration: 'none', whiteSpace: 'nowrap',
-          }}
-        >
-          {name}
-        </Link>
-      ))}
+      {visible.map((name) => {
+        const detail = detailByName.get(name)
+        const ip = ipv4Only(detail?.ipv4_address)
+        const label = (
+          <span style={{ display: 'grid', gap: 5, minWidth: 150, whiteSpace: 'normal', lineHeight: 1.25 }}>
+            <span style={{ color: 'var(--text-primary)' }}>{name}</span>
+            <span><span style={{ color: 'var(--text-muted)' }}>IPv4</span> <span style={{ color: 'var(--text-primary)' }}>{ip || '-'}</span></span>
+          </span>
+        )
+        return (
+          <Tooltip key={name} label={label}>
+            <Link
+              to={`/containers/${encodeURIComponent(name)}`}
+              className="mono"
+              style={{
+                fontSize: 11, fontWeight: 700,
+                background: 'var(--accent-dim)', color: 'var(--accent)',
+                border: '1px solid var(--accent-border)', borderRadius: 6,
+                padding: '2px 7px', textDecoration: 'none', whiteSpace: 'nowrap',
+              }}
+            >
+              {name}
+            </Link>
+          </Tooltip>
+        )
+      })}
       {!expanded && hidden > 0 && (
         <button
           onClick={(e) => { e.stopPropagation(); setExpanded(true) }}
@@ -79,43 +181,20 @@ function ContainerPills({ names, max = 3 }) {
   )
 }
 
-function usageState(item) {
-  const names = item.containers || item.instances || []
-  return names.length > 0 ? 'used' : 'unused'
-}
-
-function UsageBadge({ value }) {
-  const used = value === 'used'
-  return (
-    <span className="badge" style={{
-      background: used ? 'var(--accent-dim)' : 'var(--card-2)',
-      color: used ? 'var(--accent)' : 'var(--text-muted)',
-      borderColor: used ? 'var(--accent-border)' : 'var(--border)',
-      textTransform: 'uppercase',
-    }}>
-      {used ? 'Used' : 'Unused'}
-    </span>
-  )
-}
-
 function networkName(item) {
   const name = item.name || '-'
+  const driver = driverOf(item)
+  const tone = toneForDriver(driver)
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-      <div style={{ 
-        width: 28, height: 28, borderRadius: 6, background: 'var(--card-2)', 
-        display: 'flex', alignItems: 'center', justifyContent: 'center', 
-        border: '1px solid var(--border)', flexShrink: 0 
-      }}>
-        <BrandIcon name={name} type="network" size={16} />
-      </div>
+      <Network size={18} color={tone.color} style={{ flexShrink: 0 }} />
       <span className="mono" style={{ fontSize: 13, fontWeight: 600, color: 'var(--accent)' }}>{name}</span>
     </div>
   )
 }
 
 export default function Networks() {
-  const [query, setQuery]           = useState('')
+  const [query, setQuery] = useState('')
   const [typeFilter, setTypeFilter] = useState('all')
   const [usageFilter, setUsageFilter] = useState('all')
 
@@ -128,28 +207,51 @@ export default function Networks() {
   const networks = useMemo(() => data?.networks || [], [data?.networks])
 
   const typeOptions = useMemo(() => {
-    const types = [...new Set(networks.map((n) => n.type).filter(Boolean))].sort()
-    return [{ value: 'all', label: 'All types' }, ...types.map((t) => ({ value: t, label: t }))]
+    const counts = new Map()
+    for (const network of networks) {
+      const driver = driverOf(network)
+      counts.set(driver, (counts.get(driver) || 0) + 1)
+    }
+    return [...counts.entries()].sort(([a], [b]) => a.localeCompare(b))
   }, [networks])
+
+  const unusedCount = useMemo(() => networks.filter((network) => usageState(network) === 'unused').length, [networks])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     return networks.filter((n) => {
-      if (typeFilter !== 'all' && n.type !== typeFilter) return false
+      const driver = driverOf(n)
+      if (typeFilter !== 'all' && driver !== typeFilter) return false
       const usage = usageState(n)
       if (usageFilter !== 'all' && usage !== usageFilter) return false
       if (!q) return true
-      return [n.name, n.type, n.status, n.address, usage].join(' ').toLowerCase().includes(q)
+      return [n.name, driver, n.status, n.ipv4_subnet, n.ipv4_gateway, usage].join(' ').toLowerCase().includes(q)
     })
   }, [networks, query, typeFilter, usageFilter])
+
   const columns = useMemo(() => [
     { key: 'name', label: 'Name', accent: false, render: networkName },
     { key: 'usage', label: 'Usage', render: (item) => <UsageBadge value={usageState(item)} /> },
-    { key: 'type', label: 'Mode', render: (item) => <span className="badge" style={{ background: 'var(--accent-dim)', color: 'var(--accent)', borderColor: 'var(--accent-border)', textTransform: 'uppercase' }}>{item.mode || item.type || '—'}</span> },
-    { key: 'address', label: 'IPv4', render: (item) => [item.ipv4_subnet, item.ipv4_gateway].filter(Boolean).join(' · ') || item.address || '—' },
-    { key: 'containers', label: 'Containers', render: (item) => <ContainerPills names={item.containers || item.instances} /> },
+    { key: 'type', label: 'Mode', render: (item) => <TypeBadge driver={driverOf(item)} /> },
+    { key: 'address', label: 'IPv4', render: (item) => <SubnetPopover item={item} /> },
+    { key: 'containers', label: 'Containers', render: (item) => <ContainerPills item={item} /> },
   ], [])
   const { columnConfig, setColumnConfig, visibleColumns } = useColumnVisibility(columns, 'networks_cols')
+
+  function selectAll() {
+    setTypeFilter('all')
+    setUsageFilter('all')
+  }
+
+  function selectType(driver) {
+    setTypeFilter(driver)
+    setUsageFilter('all')
+  }
+
+  function selectUnused() {
+    setTypeFilter('all')
+    setUsageFilter('unused')
+  }
 
   return (
     <div className="page">
@@ -160,8 +262,35 @@ export default function Networks() {
       </div>
 
       <div className="instances-controls" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 16 }}>
-        <div className="instances-state-filters" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', flex: '1 1 280px' }}>
-          <button className="filter-pill active" type="button">All <span className="pill-count">{networks.length}</span></button>
+        <div className="instances-state-filters" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', flex: '1 1 360px' }}>
+          <button className={`filter-pill ${typeFilter === 'all' && usageFilter === 'all' ? 'active' : ''}`} type="button" onClick={selectAll}>
+            All <span className="pill-count">{networks.length}</span>
+          </button>
+          {typeOptions.map(([driver, count]) => {
+            const tone = toneForDriver(driver)
+            const active = typeFilter === driver && usageFilter === 'all'
+            return (
+              <button
+                key={driver}
+                className={`filter-pill ${active ? 'active' : ''}`}
+                type="button"
+                onClick={() => selectType(driver)}
+                style={active ? { background: tone.bg, color: tone.color, borderColor: tone.border } : { color: tone.color, borderColor: tone.border }}
+              >
+                {driver} <span className="pill-count">{count}</span>
+              </button>
+            )
+          })}
+          <button
+            className={`filter-pill ${usageFilter === 'unused' ? 'active' : ''}`}
+            type="button"
+            onClick={selectUnused}
+            style={usageFilter === 'unused'
+              ? { background: DRIVER_TONES.unused.bg, color: DRIVER_TONES.unused.color, borderColor: DRIVER_TONES.unused.border }
+              : { color: DRIVER_TONES.unused.color, borderColor: DRIVER_TONES.unused.border }}
+          >
+            unused <span className="pill-count">{unusedCount}</span>
+          </button>
         </div>
         <div className="instances-controls-right" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginLeft: 'auto' }}>
           <TableToolbar
@@ -170,27 +299,8 @@ export default function Networks() {
             placeholder="Search networks..."
             columnConfig={columnConfig}
             setColumnConfig={setColumnConfig}
-            style={{ width: 'clamp(280px, 34vw, 460px)' }}
-          >
-            <CustomSelect
-              value={usageFilter}
-              onChange={setUsageFilter}
-              options={[
-                { value: 'all', label: 'All usage' },
-                { value: 'used', label: 'Used' },
-                { value: 'unused', label: 'Unused' },
-              ]}
-              controlHeight={30}
-              style={{ width: 130 }}
-            />
-            <CustomSelect
-              value={typeFilter}
-              onChange={setTypeFilter}
-              options={typeOptions}
-              controlHeight={30}
-              style={{ width: 160 }}
-            />
-          </TableToolbar>
+            style={{ width: 'clamp(360px, 42vw, 560px)', minWidth: 320 }}
+          />
         </div>
       </div>
 
@@ -201,6 +311,7 @@ export default function Networks() {
           items={filtered}
           empty={query.trim() ? `No networks match "${query}"` : 'No networks available'}
           columns={visibleColumns}
+          tableMinWidth={820}
         />
       )}
     </div>

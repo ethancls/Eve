@@ -20,4 +20,5 @@ COPY --from=backend-builder /app/eve .
 EXPOSE 8100
 ENV EVE_BIND="0.0.0.0:8100"
 ENV DOCKER_HOST="unix:///var/run/docker.sock"
+ENV EVE_DB_PATH="/app/data/eve.db"
 ENTRYPOINT ["/app/eve"]

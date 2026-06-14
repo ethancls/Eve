@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/user/eve/internal/notify"
 	"github.com/user/eve/internal/store"
 )
 
@@ -58,6 +59,7 @@ func (srv *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	user, err := srv.users.Authenticate(login, body.Password)
 	if err != nil {
+		srv.logAction(r, "login", login, "error", "invalid credentials")
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
 		return
 	}
@@ -65,7 +67,17 @@ func (srv *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create session"})
 		return
 	}
+
+	// Track session IP + User-Agent
+	ip := r.Header.Get("X-Forwarded-For")
+	if ip == "" {
+		ip = r.RemoteAddr
+	}
+	ua := r.Header.Get("User-Agent")
+	srv.logAction(r, "login", user.Login, "ok", "")
 	_ = srv.users.TouchLastLogin(user.ID)
+
+	srv.sendLoginAlert(user, ip, ua)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status": "ok",
 		"user":   toSessionUser(user),
@@ -77,8 +89,119 @@ func (srv *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w)
 		return
 	}
+	srv.logAction(r, "logout", "", "ok", "")
 	srv.clearAuthCookie(w)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (srv *Server) handleForgotPassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	var body struct{ Login string `json:"login"` }
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	user, ok, _ := srv.users.GetByLogin(strings.TrimSpace(body.Login))
+	if !ok || user.Email == "" {
+		// Don't reveal whether the user exists
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
+	// Generate reset token (valid 15 min)
+	token, err := srv.createResetToken(user.ID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create reset token"})
+		return
+	}
+	resetURL := srv.cfg.AppURL + "/login?reset=" + token
+	go func() {
+		cfg := srv.buildSMTPConfig()
+		if cfg.Host != "" {
+			notify.SendNotification(cfg, user.Email,
+				"Password reset",
+				"A password reset was requested for your account **"+user.Login+"**.\n\nClick the button below to reset your password. This link expires in 15 minutes.",
+				resetURL, true)
+		}
+	}()
+	srv.logAction(r, "password reset request", user.Login, "ok", "")
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (srv *Server) handleResetPassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	var body struct {
+		Token    string `json:"token"`
+		Password string `json:"password"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	userID, err := srv.validateResetToken(body.Token)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid or expired reset token"})
+		return
+	}
+	if len(body.Password) < 4 {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "password too short"})
+		return
+	}
+	if _, err := srv.users.SetPassword(userID, body.Password); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	srv.logAction(r, "password reset", userID, "ok", "")
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (srv *Server) sendLoginAlert(user store.User, ip, ua string) {
+	if user.Email == "" {
+		return
+	}
+	// Check notification preference
+	if srv.appConfig.MustGet("notif."+user.ID+".login_alert") != "true" {
+		return
+	}
+	go func() {
+		cfg := srv.buildSMTPConfig()
+		if cfg.Host != "" {
+			notify.SendNotification(cfg, user.Email,
+				"New login to your account",
+				"A new login was detected for your account **"+user.Login+"**.",
+				"IP: "+ip+"\nUser-Agent: "+ua, false)
+		}
+	}()
+}
+
+func (srv *Server) createResetToken(userID string) (string, error) {
+	claims := jwt.MapClaims{
+		"sub": userID,
+		"purpose": "password_reset",
+		"exp": time.Now().Add(15 * time.Minute).Unix(),
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(srv.jwtSecret)
+}
+
+func (srv *Server) validateResetToken(tokenStr string) (string, error) {
+	token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
+		return srv.jwtSecret, nil
+	})
+	if err != nil || !token.Valid {
+		return "", errors.New("invalid token")
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return "", errors.New("invalid claims")
+	}
+	if claims["purpose"] != "password_reset" {
+		return "", errors.New("wrong token purpose")
+	}
+	return claims["sub"].(string), nil
 }
 
 func (srv *Server) handleMe(w http.ResponseWriter, r *http.Request) {
@@ -123,7 +246,7 @@ func (srv *Server) setAuthCookie(w http.ResponseWriter, r *http.Request, user st
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 		Secure:   requestIsSecure(r),
-		MaxAge:   int(srv.cfg.SessionTTL.Seconds()),
+		MaxAge:   int(24 * time.Hour.Seconds()),
 	})
 	return nil
 }
@@ -155,7 +278,7 @@ func (srv *Server) createAuthToken(user store.User) (string, error) {
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   user.ID,
 			IssuedAt:  jwt.NewNumericDate(now),
-			ExpiresAt: jwt.NewNumericDate(now.Add(srv.cfg.SessionTTL)),
+			ExpiresAt: jwt.NewNumericDate(now.Add(24 * time.Hour)),
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)

@@ -1,8 +1,7 @@
 import { NavLink, useLocation } from 'react-router-dom'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { version as APP_VERSION } from '../../package.json'
-import { Plus, Sun, Moon, Monitor, ChevronDown, ChevronLeft, EthernetPort, LogOut, Settings, Users, History, Layers2, LayoutGrid, Lock, Github, Package, Database, Hammer } from 'lucide-react'
-import ContainerIcon from './icons/ContainerIcon'
+import { Plus, Sun, Moon, Monitor, ChevronDown, ChevronLeft, EthernetPort, LogOut, Settings, Users, History, Layers2, LayoutGrid, Lock, Github, Package, Database, Boxes } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { useTheme } from '../contexts/useTheme'
 import { api, authLogout } from '../api/client'
@@ -12,13 +11,14 @@ import useShortcutPlatform from '../hooks/useShortcutPlatform'
 
 const NAV = [
   { group: null,        to: '/dashboard', Icon: LayoutGrid, label: 'Dashboard' },
-  { group: 'Compute',   to: '/containers', Icon: ContainerIcon, label: 'Containers' },
+  { group: 'Compute',   to: '/containers', Icon: Boxes, label: 'Containers' },
   { group: 'Compute',   to: '/projects',   Icon: Package, label: 'Projects' },
   { group: 'Resources', to: '/networks',  Icon: EthernetPort, label: 'Networks' },
   { group: 'Resources', to: '/images',    Icon: Layers2, label: 'Images' },
   { group: 'Resources', to: '/volumes',   Icon: Database, label: 'Volumes' },
   { group: 'System',    to: '/users',     Icon: Users, label: 'Users' },
-{ group: 'System',    to: '/settings',  Icon: Settings, label: 'Settings' },
+  { group: 'System',    to: '/logs',      Icon: History, label: 'Logs' },
+  { group: 'System',    to: '/settings',  Icon: Settings, label: 'Settings' },
 ]
 
 const THEME_OPTIONS = [

@@ -143,7 +143,7 @@ export default function ResourceChart({ instances = EMPTY_INSTANCES }) {
 
       {(!isAll && chartData.length === 0) || (isAll && allChartData.length === 0) ? (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: 'var(--text-secondary)', fontSize: 12, fontFamily: 'IBM Plex Mono' }}>
-          No data yet — waiting for first poll
+          No data yet
         </div>
       ) : isAll ? (
         <>

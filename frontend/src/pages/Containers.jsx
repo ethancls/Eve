@@ -12,6 +12,7 @@ import BrandIcon from '../components/BrandIcon'
 import ResourceActionButton from '../components/ResourceActionButton'
 import CustomSelect from '../components/CustomSelect'
 import Tooltip from '../components/Tooltip'
+import ImageUpdateCell from '../components/ImageUpdateCell'
 import { SkeletonTable } from '../components/Skeletons'
 
 const EMPTY_CONTAINERS = []
@@ -400,29 +401,22 @@ function VerticalActionMenu({ coords, actions, onClose }) {
 }
 
 function ContainersActions({ name, isRunning, runAction, setInspectContainer, setLogsFor, setDeleteName }) {
-  const containerRef = React.useRef(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const [menuCoords, setMenuCoords] = useState({ x: 0, y: 0 })
-  const [overflow, setOverflow] = useState([])
 
-  const allActions = useMemo(() => [
-    { key: 'start', icon: <Play size={14} />, label: 'Start', color: 'var(--running)', action: () => runAction(name, 'start', `Started ${name}`) },
-    { key: 'stop', icon: <Square size={14} />, label: 'Stop', color: 'var(--stopped)', action: () => runAction(name, 'stop', `Stopped ${name}`) },
-    { key: 'kill', icon: <XCircle size={14} />, label: 'Kill', color: 'var(--stopped)', action: () => runAction(name, 'kill', `Killed ${name}`) },
-    { key: 'restart', icon: <RotateCw size={14} />, label: 'Restart', color: '#facc15', action: () => runAction(name, 'restart', `Restarted ${name}`) },
+  const primaryActions = useMemo(() => [
+    { key: 'stop', icon: <Square size={14} />, label: 'Stop', color: 'var(--stopped)', disabled: !isRunning, action: () => runAction(name, 'stop', `Stopped ${name}`) },
+    { key: 'logs', icon: <FileText size={14} />, label: 'Logs', color: '#60a5fa', action: () => setLogsFor(name) },
+    { key: 'restart', icon: <RotateCw size={14} />, label: 'Restart', color: '#facc15', disabled: !isRunning, action: () => runAction(name, 'restart', `Restarted ${name}`) },
+  ], [isRunning, name, runAction, setLogsFor])
+
+  const menuActions = useMemo(() => [
+    ...(!isRunning ? [{ key: 'start', icon: <Play size={14} />, label: 'Start', color: 'var(--running)', action: () => runAction(name, 'start', `Started ${name}`) }] : []),
+    ...(isRunning ? [{ key: 'kill', icon: <XCircle size={14} />, label: 'Kill', color: 'var(--stopped)', action: () => runAction(name, 'kill', `Killed ${name}`) }] : []),
     { key: 'recreate', icon: <RefreshCw size={14} />, label: 'Recreate', color: '#60a5fa', action: () => runAction(name, 'recreate', `Recreated ${name}`) },
     { key: 'inspect', icon: <Info size={14} />, label: 'Inspect', color: '#a78bfa', action: () => setInspectContainer(name) },
-    { key: 'logs', icon: <FileText size={14} />, label: 'Logs', color: '#60a5fa', action: () => setLogsFor(name) },
     { key: 'delete', icon: <Trash2 size={14} />, label: 'Delete', color: 'var(--stopped)', action: () => setDeleteName(name) },
-  ], [name, runAction, setDeleteName, setInspectContainer, setLogsFor])
-
-  const stateFilteredActions = useMemo(() => allActions.filter(act => {
-    if (act.key === 'start') return !isRunning
-    if (act.key === 'stop') return isRunning
-    if (act.key === 'kill') return isRunning
-    if (act.key === 'restart') return isRunning
-    return true
-  }), [allActions, isRunning])
+  ], [isRunning, name, runAction, setDeleteName, setInspectContainer])
 
   const handleOpenMenu = (e) => {
     e.stopPropagation()
@@ -434,69 +428,24 @@ function ContainersActions({ name, isRunning, runAction, setInspectContainer, se
     setMenuOpen(true)
   }
 
-  useEffect(() => {
-    const el = containerRef.current
-    if (!el) return
-    const td = el.closest('td')
-    if (!td) return
-
-    const measure = () => {
-      const actions = stateFilteredActions
-      const tdWidth = td.getBoundingClientRect().width
-      const btnWidth = 36
-      const moreBtnWidth = 48
-      const gap = 4
-      const neededAll = actions.length * (btnWidth + gap) - gap
-
-      if (neededAll <= tdWidth - 8) {
-        setOverflow([])
-      } else {
-        let used = moreBtnWidth + gap
-        let fit = 0
-        for (let i = 0; i < actions.length; i++) {
-          if (used + btnWidth + gap <= tdWidth) {
-            used += btnWidth + gap
-            fit++
-          } else break
-        }
-        setOverflow(fit < actions.length ? actions.slice(fit) : [])
-      }
-    }
-
-    measure()
-    const obs = new ResizeObserver(measure)
-    obs.observe(td)
-    window.addEventListener('resize', measure)
-    return () => {
-      obs.disconnect()
-      window.removeEventListener('resize', measure)
-    }
-  }, [stateFilteredActions])
-
-  const inlineActions = overflow.length > 0
-    ? stateFilteredActions.filter(a => !overflow.find(o => o.key === a.key))
-    : stateFilteredActions
-  const menuActions = overflow
-
   return (
-    <div ref={containerRef} style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
-      {inlineActions.map(act => (
+    <div style={{ width: '100%', maxWidth: '100%', display: 'inline-flex', gap: 4, alignItems: 'center', justifyContent: 'flex-end', overflow: 'hidden' }}>
+      {primaryActions.map(act => (
         <ResourceActionButton
           key={act.key}
           icon={act.icon}
           label={act.label}
           color={act.color}
           onClick={act.action}
+          disabled={act.disabled}
         />
       ))}
-      {menuActions.length > 0 && (
-        <ResourceActionButton
-          icon={<MoreVertical size={32} />}
-          label=""
-          color="var(--accent)"
-          onClick={handleOpenMenu}
-        />
-      )}
+      <ResourceActionButton
+        icon={<MoreVertical size={15} />}
+        label="More actions"
+        color="var(--accent)"
+        onClick={handleOpenMenu}
+      />
       {menuOpen && (
         <VerticalActionMenu
           coords={menuCoords}
@@ -560,52 +509,6 @@ function NoPortPopover({ port, onClose }) {
       </div>
     </div>,
     document.body
-  )
-}
-
-function UpdateCheckCell({ item }) {
-  const img = displayImage(item)
-  const { data, isLoading, isFetching, refetch } = useQuery({
-    queryKey: ['image-update', img],
-    queryFn: () => api.checkImageUpdate(img),
-    enabled: Boolean(img) && img !== '<none>' && img !== '-',
-    staleTime: 0,
-    retry: 1,
-  })
-
-  if (!img || img === '<none>' || img === '-') return <span style={{ color: 'var(--text-muted)' }}>—</span>
-
-  if (isLoading) {
-    return <div style={{ width: 16, height: 16, borderRadius: 4, background: 'var(--card-2)', animation: 'skeleton-shimmer 2s ease-in-out infinite' }} />
-  }
-
-  const hasUpdate = data?.update_available === true
-  const cantCompare = !data?.local_digest || !data?.remote_digest
-  const hasError = data?.error && !data?.remote_digest
-
-  const title = hasError ? `Registry error: ${data.error}. Click to retry.`
-    : hasUpdate ? `Update available! Click to re-check.`
-    : cantCompare ? `Unable to compare. Click to re-check.`
-    : `Up to date. Click to re-check.`
-
-  return (
-    <button
-      onClick={() => refetch()}
-      title={title}
-      style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, display: 'flex', alignItems: 'center' }}
-    >
-      {isFetching ? (
-        <div style={{ width: 14, height: 14, border: '2px solid var(--border)', borderTopColor: 'var(--accent)', borderRadius: '50%', animation: 'spin 0.6s linear infinite' }} />
-      ) : hasError ? (
-        <HelpCircle size={15} color="var(--text-muted)" />
-      ) : hasUpdate ? (
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="#f59e0b" strokeWidth="2"/><path d="M12 8v5M12 16h.01" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round"/></svg>
-      ) : cantCompare ? (
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="#888" strokeWidth="2"/><path d="M8 12h8M12 8v8" stroke="#888" strokeWidth="2" strokeLinecap="round"/></svg>
-      ) : (
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="#22c55e" strokeWidth="2"/><path d="M8 12l3 3 5-5" stroke="#22c55e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-      )}
-    </button>
   )
 }
 
@@ -908,6 +811,7 @@ export default function Containers() {
       key: 'name',
       label: 'Name',
       accent: false,
+      width: '17%',
       render: (item) => {
         const name = displayNameText(item)
         const proj = getProject(item)
@@ -940,7 +844,7 @@ export default function Containers() {
         </span>
       )
     }},
-    { key: 'image', label: 'Image', maxWidth: 360, render: (item) => {
+    { key: 'image', label: 'Image', width: '20%', maxWidth: 360, render: (item) => {
       const img = displayImage(item)
       let url = '#'
       if (img && !img.includes('/')) url = `https://hub.docker.com/_/${img.split(':')[0]}`
@@ -952,7 +856,7 @@ export default function Containers() {
         </a>
       )
     }},
-    { key: 'update', label: 'Upd', textAlign: 'center', render: (item) => <UpdateCheckCell item={item} /> },
+    { key: 'update', label: 'Upd', width: 58, textAlign: 'center', render: (item) => <ImageUpdateCell image={displayImage(item)} /> },
     { key: 'cpus', label: '% CPU', render: (item) => {
       if (!isContainerRunning(item)) {
         return <span className="mono" style={{ color: 'var(--text-muted)', fontSize: 12 }}>-</span>
@@ -983,7 +887,7 @@ export default function Containers() {
         </div>
       )
     }},
-    { key: 'network', label: 'Ports', render: (item) => {
+    { key: 'network', label: 'Ports', width: '14%', render: (item) => {
         const rawPorts = item.raw?.Ports || []
         const seen = new Set()
         const entries = []
@@ -1039,7 +943,7 @@ export default function Containers() {
           <h1 className="page-title">Containers</h1>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
-          <Link to="/containers/new" className="btn-accent">
+          <Link to="/containers/new" className="btn-accent page-action-btn">
             <Plus size={15} /> New Container
           </Link>
         </div>
@@ -1114,6 +1018,9 @@ export default function Containers() {
           getItemKey={displayNameText}
           onToggleSelect={toggleSelect}
           onToggleSelectAll={toggleSelectAll}
+          tableMinWidth={0}
+          tableLayout="fixed"
+          actionsWidth={180}
           renderActions={(item) => {
             const name = displayNameText(item)
             const state = displayState(item)

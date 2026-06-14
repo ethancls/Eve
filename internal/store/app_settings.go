@@ -42,6 +42,11 @@ func (s *AppSettingsStore) Get(key string) (string, bool, error) {
 	return value, true, nil
 }
 
+func (s *AppSettingsStore) MustGet(key string) string {
+	v, _, _ := s.Get(key)
+	return v
+}
+
 func (s *AppSettingsStore) Set(key, value string) error {
 	unlock := lockSQLiteWrite()
 	defer unlock()

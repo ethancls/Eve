@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, KeyRound, Pencil, Trash2, ChevronsUpDown, ChevronUp, ChevronDown, X } from 'lucide-react'
+import { Plus, KeyRound, Pencil, Trash2, ChevronsUpDown, ChevronUp, ChevronDown, X, Eye } from 'lucide-react'
 import { toast } from '../toast'
 import { api } from '../api/client'
 import Modal from '../components/Modal'
@@ -22,6 +23,7 @@ import {
 
 const COLUMNS = [
   { key: 'login', label: 'Login' },
+  { key: 'email', label: 'Email' },
   { key: 'name', label: 'Name' },
   { key: 'auth', label: 'Auth' },
   { key: 'role', label: 'Role' },
@@ -51,11 +53,67 @@ function fmtDate(ts) {
 }
 
 function authType(user) {
+  const parts = authMethods(user)
+  if (parts.length === 0) return '—'
+  return parts.join(' + ')
+}
+
+function authMethods(user) {
   const parts = []
   if (user.has_password) parts.push('Local')
   if (user.oidc_issuer && user.oidc_subject) parts.push('OIDC')
-  if (parts.length === 0) return '—'
-  return parts.join(' + ')
+  return parts
+}
+
+function authTone(method) {
+  if (method === 'Local') {
+    return {
+      color: '#22c55e',
+      background: 'rgba(34, 197, 94, 0.12)',
+      border: 'rgba(34, 197, 94, 0.28)',
+    }
+  }
+  return {
+    color: '#7c9cff',
+    background: 'rgba(124, 156, 255, 0.13)',
+    border: 'rgba(124, 156, 255, 0.28)',
+  }
+}
+
+function AuthBadges({ user }) {
+  const methods = authMethods(user)
+  if (methods.length === 0) {
+    return <span className="mono" style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>—</span>
+  }
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+      {methods.map((method) => {
+        const tone = authTone(method)
+        return (
+          <span
+            key={method}
+            className="mono"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              borderRadius: 999,
+              padding: '3px 7px',
+              border: `1px solid ${tone.border}`,
+              background: tone.background,
+              color: tone.color,
+              fontSize: 10.5,
+              fontWeight: 800,
+              lineHeight: 1,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {method}
+          </span>
+        )
+      })}
+    </div>
+  )
 }
 
 function roleColor(role) {
@@ -74,6 +132,7 @@ function roleLabel(role) {
 function sortValue(user, key) {
   if (key === 'login') return String(user.login || '').toLowerCase()
   if (key === 'name') return String(user.name || '').toLowerCase()
+  if (key === 'email') return String(user.email || '').toLowerCase()
   if (key === 'auth') return authType(user).toLowerCase()
   if (key === 'role') return normalizeRole(user.role)
   if (key === 'last_login') return user.last_login ? new Date(user.last_login).getTime() : 0
@@ -188,6 +247,7 @@ function UserFormModal({
   const [form, setForm] = useState(() => ({
     login: initial?.login || '',
     password: '',
+    email: initial?.email || '',
     name: initial?.name || '',
     avatar_url: initial?.avatar_url || '',
     oidc_issuer: initial?.oidc_issuer || '',
@@ -212,6 +272,7 @@ function UserFormModal({
     try {
       const payload = {
         login: form.login,
+        email: form.email,
         name: form.name,
         avatar_url: form.avatar_url,
         oidc_issuer: form.oidc_issuer,
@@ -285,6 +346,17 @@ function UserFormModal({
             disabled={isOIDCLinkedEdit}
           />
         </div>
+        <div>
+          <label className="input-label" htmlFor="uf-email">Email</label>
+          <input
+            id="uf-email"
+            className="input"
+            type="email"
+            value={form.email}
+            onChange={(e) => set('email', e.target.value)}
+            placeholder="user@example.com"
+          />
+        </div>
 
         <div>
           <label className="input-label" htmlFor="uf-role">Role</label>
@@ -313,7 +385,7 @@ function UserFormModal({
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <div className="user-form-oidc-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <div>
             <label className="input-label" htmlFor="uf-oidc-issuer">OIDC Issuer</label>
             <input
@@ -397,6 +469,7 @@ export default function Users() {
   const [createOpen, setCreateOpen] = useState(false)
   const [editUser, setEditUser] = useState(null)
   const [passwordUser, setPasswordUser] = useState(null)
+  const [detailUser, setDetailUser] = useState(null)
   const [deleteUser, setDeleteUser] = useState(null)
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
   const [forbiddenAction, setForbiddenAction] = useState(null)
@@ -474,7 +547,7 @@ export default function Users() {
   })
 
   const loadingAction = createMutation.isPending || updateMutation.isPending || passwordMutation.isPending || deleteMutation.isPending || bulkDeleting
-  const { columnConfig, setColumnConfig, visibleColumns } = useColumnVisibility(COLUMNS, 'users_cols')
+  const { columnConfig, setColumnConfig, visibleColumns } = useColumnVisibility(COLUMNS, 'users_cols_v3')
   const visibleUserColumnIds = useMemo(
     () => new Set(visibleColumns.map((col) => col.key || col.label)),
     [visibleColumns],
@@ -498,6 +571,7 @@ export default function Users() {
       if (!q) return true
       const hay = [
         u.login,
+        u.email,
         u.name,
         authType(u),
         roleLabel(u.role),
@@ -661,14 +735,14 @@ export default function Users() {
             placeholder="Search users..."
             columnConfig={columnConfig}
             setColumnConfig={setColumnConfig}
-            style={{ width: 'clamp(320px, 42vw, 560px)' }}
+            style={{ width: 'clamp(300px, 34vw, 460px)', flex: '0 1 460px' }}
           >
             <CustomSelect
               value={authFilter}
               onChange={setAuthFilter}
               options={AUTH_FILTER_OPTIONS}
               controlHeight={30}
-              style={{ minWidth: 140, width: 'clamp(160px, 24vw, 240px)', flex: '0 1 auto' }}
+              style={{ minWidth: 106, width: 106, flex: '0 0 106px' }}
             />
           </TableToolbar>
         </div>
@@ -774,6 +848,12 @@ export default function Users() {
                         </td>
                       )}
 
+                      {visibleUserColumnIds.has('email') && (
+                        <td style={{ padding: '14px 18px' }}>
+                          <span className="mono" style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>{u.email || '-'}</span>
+                        </td>
+                      )}
+
                       {visibleUserColumnIds.has('name') && (
                         <td style={{ padding: '14px 18px' }}>
                           <span style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>{u.name || '—'}</span>
@@ -782,13 +862,13 @@ export default function Users() {
 
                       {visibleUserColumnIds.has('auth') && (
                         <td style={{ padding: '14px 18px' }}>
-                          <span className="mono" style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>{authType(u)}</span>
+                          <AuthBadges user={u} />
                         </td>
                       )}
 
                       {visibleUserColumnIds.has('role') && (
                         <td style={{ padding: '14px 18px' }}>
-                          <span className="mono" style={{ fontSize: 11.5, color: roleColor(u.role) }}>{roleLabel(u.role)}</span>
+                          <span className="mono" style={{ fontSize: 11.5, fontWeight: 800, color: roleColor(u.role) }}>{roleLabel(u.role)}</span>
                         </td>
                       )}
 
@@ -807,6 +887,12 @@ export default function Users() {
                       {visibleUserColumnIds.has('Actions') && (
                         <td style={{ padding: '14px 18px' }}>
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+                            <ActionBtn
+                              label="User details"
+                              color="#a78bfa"
+                              onClick={() => setDetailUser(u)}
+                              icon={<Eye size={14} />}
+                            />
                             <ActionBtn
                               label="Edit user"
                               color="#22d3ee"
@@ -934,6 +1020,79 @@ export default function Users() {
           onClose={() => setForbiddenAction(null)}
         />
       )}
+
+      {detailUser && (
+        <UserDetailPanel user={detailUser} onClose={() => setDetailUser(null)} />
+      )}
     </div>
+  )
+}
+
+function UserDetailPanel({ user, onClose }) {
+  const navigate = useNavigate()
+  const { data, isLoading } = useQuery({
+    queryKey: ['user-details', user.id],
+    queryFn: () => api.getUserDetails(user.id),
+    enabled: Boolean(user?.id),
+  })
+  const details = data || {}
+  const u = details.user || user
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(0,0,0,0.3)', backdropFilter: 'blur(2px)' }} />
+      <div style={{ position: 'fixed', top: 0, right: 0, bottom: 0, zIndex: 501, width: 'min(440px, 90vw)', background: 'var(--card-1)', borderLeft: '1px solid var(--border)', overflowY: 'auto', padding: 24, animation: 'slide-in-right 0.2s ease' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>{u.login}</h2>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, borderRadius: 6 }}>
+            <X size={18} />
+          </button>
+        </div>
+
+        {isLoading ? (
+          <div className="skeleton" style={{ height: 200, borderRadius: 10 }} />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {[
+              { label: 'Login', value: u.login },
+              { label: 'Email', value: u.email || '-' },
+              { label: 'Name', value: u.name || '—' },
+              { label: 'Role', value: u.role, color: u.role === 'owner' ? '#ff9d2d' : u.role === 'administrator' ? 'var(--accent)' : 'var(--text-secondary)' },
+              { label: 'Auth methods', value: (details.auth_methods || []).join(', ') || '—' },
+              { label: 'Has password', value: u.has_password ? 'Yes' : 'No' },
+              { label: 'OIDC linked', value: u.oidc_issuer ? `${u.oidc_issuer}` : 'No' },
+              { label: 'Created', value: u.created_at ? new Date(u.created_at).toLocaleString() : '—' },
+              { label: 'Last login', value: u.last_login ? new Date(u.last_login).toLocaleString() : '—' },
+              { label: 'Updated', value: u.updated_at ? new Date(u.updated_at).toLocaleString() : '—' },
+            ].map(({ label, value, color }) => (
+              <div key={label}>
+                <p style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 4px' }}>{label}</p>
+                <p className="mono" style={{ margin: 0, fontSize: 13, fontWeight: 600, color: color || 'var(--text-primary)' }}>{value}</p>
+              </div>
+            ))}
+
+            {details.recent_activity?.length > 0 && (
+              <div>
+                <p style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 8px' }}>Recent activity</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {details.recent_activity.slice(0, 10).map((a, i) => (
+                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '4px 0', borderBottom: '1px solid var(--border)' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>{a.action}</span>
+                      <span className="mono" style={{ color: a.status === 'ok' ? 'var(--running)' : 'var(--stopped)' }}>{a.status}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              <button className="btn" onClick={() => { navigate('/users'); onClose() }} style={{ flex: 1, justifyContent: 'center' }}>
+                Close
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </>
   )
 }

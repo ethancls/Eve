@@ -1,13 +1,14 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Download, Trash2, Layers } from 'lucide-react'
+import { ArrowUpRight, Download, Package, Trash2 } from 'lucide-react'
 import { toast } from '../toast'
 import { api } from '../api/client'
 import ContainerDataTable from '../components/ContainerDataTable'
 import CustomSelect from '../components/CustomSelect'
 import ConfirmModal from '../components/ConfirmModal'
-import BrandIcon from '../components/BrandIcon'
 import ResourceActionButton from '../components/ResourceActionButton'
+import ImageUpdateCell from '../components/ImageUpdateCell'
+import { RegistryProviderIcon } from '../components/RegistryProviderIcon'
 import { SkeletonTable } from '../components/Skeletons'
 import TableToolbar from '../components/TableToolbar'
 import { useColumnVisibility } from '../hooks/useColumnVisibility'
@@ -17,19 +18,44 @@ const EMPTY_RESULTS = []
 
 function imageName(item) {
   const full = item.name || '-'
-  const name = full.split(':')[0]
+  const name = imageRepository(full)
+  const url = dockerHubURL(full)
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-      <div style={{ 
-        width: 28, height: 28, borderRadius: 6, background: 'var(--card-2)', 
-        display: 'flex', alignItems: 'center', justifyContent: 'center', 
-        border: '1px solid var(--border)', flexShrink: 0 
-      }}>
-        <BrandIcon name={name} type="image" size={16} />
-      </div>
-      <span className="mono" style={{ fontSize: 13, fontWeight: 600, color: 'var(--accent)' }}>{name}</span>
+      <Package size={18} color="var(--accent)" style={{ flexShrink: 0 }} />
+      {url ? (
+        <a href={url} target="_blank" rel="noreferrer" className="mono" style={{ fontSize: 13, fontWeight: 600, color: 'var(--accent)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          {name}
+          <ArrowUpRight size={12} style={{ opacity: 0.5 }} />
+        </a>
+      ) : (
+        <span className="mono" style={{ fontSize: 13, fontWeight: 600, color: 'var(--accent)' }}>{name}</span>
+      )}
     </div>
   )
+}
+
+function imageRepository(image) {
+  const withoutDigest = String(image || '').split('@')[0]
+  const lastSlash = withoutDigest.lastIndexOf('/')
+  const lastColon = withoutDigest.lastIndexOf(':')
+  return lastColon > lastSlash ? withoutDigest.slice(0, lastColon) : withoutDigest
+}
+
+function dockerHubURL(image) {
+  let repo = imageRepository(image)
+  if (!repo || repo === '<none>') return null
+  const firstSegment = repo.split('/')[0]
+  const hasRegistry = firstSegment.includes('.') || firstSegment.includes(':') || firstSegment === 'localhost'
+  if (hasRegistry) {
+    if (firstSegment !== 'docker.io' && firstSegment !== 'index.docker.io') return null
+    repo = repo.split('/').slice(1).join('/')
+  }
+  if (repo.startsWith('library/')) repo = repo.slice('library/'.length)
+  const parts = repo.split('/').filter(Boolean)
+  if (parts.length === 1) return `https://hub.docker.com/_/${parts[0]}`
+  if (parts.length >= 2) return `https://hub.docker.com/r/${parts[0]}/${parts[1]}`
+  return null
 }
 
 function imageTag(item) {
@@ -64,6 +90,12 @@ function usageState(item) {
   return (item.containers || []).length > 0 ? 'used' : 'unused'
 }
 
+function normalizeProvider(value) {
+  const raw = String(value || '').trim().toLowerCase()
+  if (raw === 'ghcr' || raw === 'ghcr.io') return 'ghcr.io'
+  return 'docker.io'
+}
+
 function UsageBadge({ value }) {
   const used = value === 'used'
   return (
@@ -85,6 +117,8 @@ export default function Images() {
   const [provider, setProvider] = useState('docker.io')
   const [registryQuery, setRegistryQuery] = useState('')
   const [deleteImage, setDeleteImage] = useState(null)
+  const defaultProviderInitialized = useRef(false)
+  const providerTouched = useRef(false)
 
   const localImagesQuery = useQuery({
     queryKey: ['images-local'],
@@ -92,6 +126,22 @@ export default function Images() {
     refetchInterval: 15000,
     retry: false,
   })
+
+  const defaultProviderQuery = useQuery({
+    queryKey: ['setting', 'registry.default_provider'],
+    queryFn: () => api.getSetting('registry.default_provider'),
+    staleTime: 60000,
+    retry: false,
+  })
+
+  useEffect(() => {
+    if (!defaultProviderQuery.isSuccess || defaultProviderInitialized.current || providerTouched.current) return
+    defaultProviderInitialized.current = true
+    const timer = setTimeout(() => {
+      setProvider(normalizeProvider(defaultProviderQuery.data?.value))
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [defaultProviderQuery.data?.value, defaultProviderQuery.isSuccess])
 
   const registryQueryResult = useQuery({
     queryKey: ['registry-search', provider, registryQuery],
@@ -102,11 +152,15 @@ export default function Images() {
   })
 
   const localImages = localImagesQuery.data?.images || EMPTY_IMAGES
+  const registryProviderOptions = useMemo(() => [
+    { value: 'docker.io', label: 'Docker Hub', icon: <RegistryProviderIcon provider="docker.io" /> },
+    { value: 'ghcr.io', label: 'GHCR', icon: <RegistryProviderIcon provider="ghcr.io" /> },
+  ], [])
   const localColumns = useMemo(() => [
     { key: 'name', label: 'Image', accent: false, render: imageName },
     { key: 'usage', label: 'Usage', render: (item) => <UsageBadge value={usageState(item)} /> },
     { key: 'tag', label: 'Tag / Digest', render: imageTag },
-    { key: 'platforms', label: 'Platforms', render: (item) => item.platforms?.length ? item.platforms.join(', ') : '-' },
+    { key: 'update', label: 'Update', width: 72, textAlign: 'center', render: (item) => <ImageUpdateCell image={item.name} /> },
     { key: 'size', label: 'Size', render: imageSize },
     { key: 'created', label: 'Created', render: (item) => formatDate(item.created) },
   ], [])
@@ -199,7 +253,8 @@ export default function Images() {
             empty="No local images"
             columns={localColumnState.visibleColumns}
             renderActions={(item) => {
-              const name = item.name
+              const name = item.name && item.name !== '<none>' ? item.name : item.id
+              if (usageState(item) === 'used') return null
               return (
                 <div style={{ display: 'inline-flex', gap: 5 }}>
                   <ResourceActionButton icon={<Trash2 size={14} />} label="Delete image" color="var(--stopped)" onClick={() => setDeleteImage(name)} />
@@ -213,25 +268,22 @@ export default function Images() {
 
       <section>
         <div className="instances-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, gap: 12, flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-             <Layers size={18} color="var(--text-secondary)" />
-             <p className="section-title" style={{ margin: 0 }}>Registry Search</p>
-          </div>
+          <p className="section-title" style={{ margin: 0 }}>Registry Search</p>
           <TableToolbar
             query={registryQuery}
             onQueryChange={setRegistryQuery}
-            placeholder={provider === 'ghcr' ? 'owner/image' : 'Search images'}
+            placeholder={provider === 'ghcr.io' ? 'owner/image' : 'Search images'}
             columnConfig={registryColumnState.columnConfig}
             setColumnConfig={registryColumnState.setColumnConfig}
             style={{ width: 'clamp(300px, 36vw, 520px)' }}
           >
             <CustomSelect
               value={provider}
-              onChange={setProvider}
-              options={[
-                { value: 'docker.io', label: 'Docker Hub' },
-                { value: 'ghcr.io', label: 'GHCR' },
-              ]}
+              onChange={(next) => {
+                providerTouched.current = true
+                setProvider(next)
+              }}
+              options={registryProviderOptions}
               controlHeight={30}
               style={{ width: 150 }}
             />

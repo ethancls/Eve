@@ -1,16 +1,26 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 
+	containertype "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/user/eve/internal/store"
 )
+
+func dockerSocket() string {
+	if s := os.Getenv("DOCKER_HOST"); s != "" {
+		return s
+	}
+	return "unix:///var/run/docker.sock"
+}
 
 func (srv *Server) handleContainerSystem(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
@@ -19,7 +29,7 @@ func (srv *Server) handleContainerSystem(w http.ResponseWriter, r *http.Request)
 			"installed": true,
 			"running":   err == nil,
 			"binary":    "docker",
-			"socket":    "unix:///var/run/docker.sock",
+			"socket":    dockerSocket(),
 		}
 		if err != nil {
 			state["error"] = err.Error()
@@ -36,11 +46,11 @@ func (srv *Server) handleSystemPrune(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := srv.mp.PruneSystem(r.Context()); err != nil {
-		srv.logAction("prune", "", "error", err.Error())
+		srv.logAction(r, "prune", "", "error", err.Error())
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	srv.logAction("prune", "", "ok", "")
+	srv.logAction(r, "prune", "", "ok", "")
 	writeJSON(w, http.StatusOK, map[string]string{"status": "pruned successfully"})
 }
 
@@ -92,11 +102,11 @@ func (srv *Server) handleContainersDispatch(w http.ResponseWriter, r *http.Reque
 
 		id, err := srv.mp.CreateAndStartContainer(r.Context(), body.Image, body.Name, body.Args, body.Options.Env, body.Options.Ports)
 		if err != nil {
-			srv.logAction("container create", body.Name, "error", err.Error())
+			srv.logAction(r, "container create", body.Name, "error", err.Error())
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		srv.logAction("container create", body.Name, "ok", "")
+		srv.logAction(r, "container create", body.Name, "ok", "")
 		writeJSON(w, http.StatusOK, map[string]any{"id": id, "status": "started"})
 	default:
 		methodNotAllowed(w)
@@ -141,11 +151,11 @@ func (srv *Server) routeContainers(w http.ResponseWriter, r *http.Request) {
 		case http.MethodDelete:
 			err := srv.mp.RemoveContainer(r.Context(), name, true)
 			if err != nil {
-				srv.logAction("container remove", name, "error", err.Error())
+				srv.logAction(r, "container remove", name, "error", err.Error())
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 				return
 			}
-			srv.logAction("container remove", name, "ok", "")
+			srv.logAction(r, "container remove", name, "ok", "")
 			writeJSON(w, http.StatusOK, map[string]any{"status": "success"})
 		default:
 			methodNotAllowed(w)
@@ -177,11 +187,11 @@ func (srv *Server) routeContainers(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err != nil {
-			srv.logAction("container "+action, name, "error", err.Error())
+			srv.logAction(r, "container "+action, name, "error", err.Error())
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		srv.logAction("container "+action, name, "ok", "")
+		srv.logAction(r, "container "+action, name, "ok", "")
 		writeJSON(w, http.StatusOK, map[string]any{"status": "success"})
 	case "logs":
 		logsReader, err := srv.mp.ContainerLogs(r.Context(), name)
@@ -302,19 +312,31 @@ func (srv *Server) handleLocalImages(w http.ResponseWriter, r *http.Request) {
 		switch body.Action {
 		case "pull":
 			if err := srv.mp.PullImage(r.Context(), body.Image); err != nil {
-				srv.logAction("image pull", body.Image, "error", err.Error())
+				srv.logAction(r, "image pull", body.Image, "error", err.Error())
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 				return
 			}
-			srv.logAction("image pull", body.Image, "ok", "")
+			srv.logAction(r, "image pull", body.Image, "ok", "")
 			writeJSON(w, http.StatusOK, map[string]any{"status": "pulled"})
 		case "delete":
-			if err := srv.mp.RemoveImage(r.Context(), body.Image, true); err != nil {
-				srv.logAction("image delete", body.Image, "error", err.Error())
+			attached, err := srv.imageAttachedContainers(r.Context(), body.Image)
+			if err != nil {
+				srv.logAction(r, "image delete", body.Image, "error", err.Error())
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 				return
 			}
-			srv.logAction("image delete", body.Image, "ok", "")
+			if len(attached) > 0 {
+				msg := fmt.Sprintf("image is used by %d container(s): %s", len(attached), strings.Join(attached, ", "))
+				srv.logAction(r, "image delete", body.Image, "error", msg)
+				writeJSON(w, http.StatusConflict, map[string]string{"error": msg})
+				return
+			}
+			if err := srv.mp.RemoveImage(r.Context(), body.Image, true); err != nil {
+				srv.logAction(r, "image delete", body.Image, "error", err.Error())
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			srv.logAction(r, "image delete", body.Image, "ok", "")
 			writeJSON(w, http.StatusOK, map[string]any{"status": "deleted"})
 		default:
 			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "unsupported action"})
@@ -344,12 +366,23 @@ func (srv *Server) handleRegistrySearch(w http.ResponseWriter, r *http.Request) 
 	if strings.Contains(provider, "ghcr.io") {
 		searchURL = fmt.Sprintf("https://api.github.com/search/repositories?q=%s", url.QueryEscape(q))
 		req, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, searchURL, nil)
+		req.Header.Set("Accept", "application/vnd.github+json")
+		req.Header.Set("User-Agent", "Eve/1.0")
+		if srv.appConfig != nil {
+			if token, ok, err := srv.appConfig.Get("registry.ghcr_token"); err == nil && ok && strings.TrimSpace(token) != "" {
+				req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(token))
+			}
+		}
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
 			return
 		}
 		defer resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("github registry search failed: %s", resp.Status)})
+			return
+		}
 		var githubResp struct {
 			Items []struct {
 				FullName    string `json:"full_name"`
@@ -544,16 +577,146 @@ func (srv *Server) routeVolumes(w http.ResponseWriter, r *http.Request) {
 	name := parts[0]
 
 	if r.Method == http.MethodDelete {
-		if err := srv.mp.RemoveVolume(r.Context(), name); err != nil {
-			srv.logAction("volume remove", name, "error", err.Error())
+		attached, refCount, err := srv.volumeUsage(r.Context(), name)
+		if err != nil {
+			srv.logAction(r, "volume remove", name, "error", err.Error())
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		srv.logAction("volume remove", name, "ok", "")
+		if len(attached) > 0 || refCount > 0 {
+			msg := "volume is in use"
+			if len(attached) > 0 {
+				msg = fmt.Sprintf("%s by %d container(s): %s", msg, len(attached), strings.Join(attached, ", "))
+			}
+			if refCount > 0 {
+				msg = fmt.Sprintf("%s (ref_count: %d)", msg, refCount)
+			}
+			srv.logAction(r, "volume remove", name, "error", msg)
+			writeJSON(w, http.StatusConflict, map[string]string{"error": msg})
+			return
+		}
+		if err := srv.mp.RemoveVolume(r.Context(), name); err != nil {
+			srv.logAction(r, "volume remove", name, "error", err.Error())
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		srv.logAction(r, "volume remove", name, "ok", "")
 		writeJSON(w, http.StatusOK, map[string]any{"status": "deleted"})
 		return
 	}
 	methodNotAllowed(w)
+}
+
+func (srv *Server) imageAttachedContainers(ctx context.Context, image string) ([]string, error) {
+	containers, err := srv.mp.ListContainers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	images, err := srv.mp.ListImages(ctx)
+	if err != nil {
+		return nil, err
+	}
+	refs := imageReferenceSet(image)
+	for _, img := range images {
+		if !imageReferenceMatches(refs, img.ID, img.RepoTags, img.RepoDigests) {
+			continue
+		}
+		addImageRef(refs, img.ID)
+		for _, repoTag := range img.RepoTags {
+			addImageRef(refs, repoTag)
+		}
+		for _, repoDigest := range img.RepoDigests {
+			addImageRef(refs, repoDigest)
+		}
+	}
+	return imageAttachedContainers(containers, refs), nil
+}
+
+func imageReferenceSet(image string) map[string]bool {
+	refs := make(map[string]bool)
+	addImageRef(refs, image)
+	return refs
+}
+
+func addImageRef(refs map[string]bool, ref string) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return
+	}
+	refs[ref] = true
+	if trimmed := strings.TrimPrefix(ref, "sha256:"); trimmed != "" {
+		refs[trimmed] = true
+	}
+}
+
+func imageReferenceMatches(refs map[string]bool, id string, tags, digests []string) bool {
+	candidates := append([]string{id, strings.TrimPrefix(id, "sha256:")}, tags...)
+	candidates = append(candidates, digests...)
+	for _, candidate := range candidates {
+		if refs[strings.TrimSpace(candidate)] {
+			return true
+		}
+	}
+	return false
+}
+
+func imageAttachedContainers(containers []containertype.Summary, refs map[string]bool) []string {
+	if len(refs) == 0 {
+		return nil
+	}
+	var attached []string
+	seen := make(map[string]bool)
+	for _, c := range containers {
+		name := "unknown"
+		if len(c.Names) > 0 {
+			name = strings.TrimPrefix(c.Names[0], "/")
+		}
+		candidateRefs := []string{c.Image, c.ImageID, strings.TrimPrefix(c.ImageID, "sha256:")}
+		for _, ref := range candidateRefs {
+			if ref == "" || !refs[ref] || seen[name] {
+				continue
+			}
+			attached = append(attached, name)
+			seen[name] = true
+		}
+	}
+	return attached
+}
+
+func (srv *Server) volumeUsage(ctx context.Context, name string) ([]string, int, error) {
+	containers, err := srv.mp.ListContainers(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	var attached []string
+	seen := make(map[string]bool)
+	for _, c := range containers {
+		containerName := "unknown"
+		if len(c.Names) > 0 {
+			containerName = strings.TrimPrefix(c.Names[0], "/")
+		}
+		for _, m := range c.Mounts {
+			if m.Name != name || seen[containerName] {
+				continue
+			}
+			attached = append(attached, containerName)
+			seen[containerName] = true
+		}
+	}
+
+	refCount := 0
+	vols, err := srv.mp.ListVolumes(ctx)
+	if err != nil {
+		return attached, 0, err
+	}
+	for _, v := range vols {
+		if v.Name != name || v.UsageData == nil {
+			continue
+		}
+		refCount = int(v.UsageData.RefCount)
+		break
+	}
+	return attached, refCount, nil
 }
 
 func (srv *Server) handleBuilder(w http.ResponseWriter, r *http.Request) {

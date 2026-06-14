@@ -211,7 +211,7 @@ function ProjectEditorModal({ name, onClose }) {
           )}
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
-            <button className="btn-secondary" onClick={onClose} disabled={saveMutation.isPending}>
+            <button className="btn-ghost" onClick={onClose} disabled={saveMutation.isPending}>
               Cancel
             </button>
             <button

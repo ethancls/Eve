@@ -106,6 +106,25 @@
 .btn-danger:hover { background:rgba(240,71,71,0.2); }
 .btn-danger:disabled { opacity:0.4; cursor:not-allowed; }
 
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 38px;
+  padding: 0 16px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--card-2);
+  color: var(--text-secondary);
+  transition: background 0.13s, color 0.13s, border-color 0.13s;
+  white-space: nowrap;
+}
+.btn:hover { color: var(--text-primary); border-color: var(--border-hover); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
 .icon-btn {
   display: inline-flex;
   align-items: center;

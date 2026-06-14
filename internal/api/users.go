@@ -53,6 +53,18 @@ func (srv *Server) routeUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(parts) == 2 && parts[1] == "details" {
+		srv.handleGetUserDetails(w, r, id)
+		return
+	}
+	if len(parts) == 2 && parts[1] == "passkeys" && r.Method == http.MethodGet {
+		srv.handleListUserPasskeys(w, r, id)
+		return
+	}
+	if len(parts) == 3 && parts[1] == "passkeys" && r.Method == http.MethodDelete {
+		srv.handleDeleteUserPasskey(w, r, id, parts[2])
+		return
+	}
 	if len(parts) == 1 {
 		switch r.Method {
 		case http.MethodGet:
@@ -135,6 +147,37 @@ func (srv *Server) handleGetUser(w http.ResponseWriter, r *http.Request, id stri
 	writeJSON(w, http.StatusOK, map[string]any{"user": user})
 }
 
+func (srv *Server) handleGetUserDetails(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	if _, ok := srv.requireAdminRequest(r); !ok {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "administrator role required"})
+		return
+	}
+	user, found, err := srv.users.GetByID(id)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "user not found"})
+		return
+	}
+
+	records, _, _ := srv.activity.Query(store.ActivityFilter{Limit: 20, UserID: user.ID})
+	authMethods := []string{}
+	if user.HasPassword { authMethods = append(authMethods, "password") }
+	if user.OIDCIssuer != "" { authMethods = append(authMethods, "oidc") }
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"user":            user,
+		"auth_methods":    authMethods,
+		"recent_activity": records,
+	})
+}
+
 func (srv *Server) handleCurrentUser(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		methodNotAllowed(w)
@@ -170,6 +213,7 @@ func (srv *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Login       string `json:"login"`
 		Password    string `json:"password"`
+		Email       string `json:"email"`
 		Name        string `json:"name"`
 		AvatarURL   string `json:"avatar_url"`
 		OIDCIssuer  string `json:"oidc_issuer"`
@@ -189,6 +233,7 @@ func (srv *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	user, err := srv.users.Create(store.CreateUserInput{
 		Login:       body.Login,
 		Password:    body.Password,
+		Email:       body.Email,
 		Name:        body.Name,
 		AvatarURL:   body.AvatarURL,
 		OIDCIssuer:  body.OIDCIssuer,
@@ -325,6 +370,7 @@ func (srv *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request, id s
 
 	var body struct {
 		Login       *string `json:"login"`
+		Email       *string `json:"email"`
 		Name        *string `json:"name"`
 		AvatarURL   *string `json:"avatar_url"`
 		OIDCIssuer  *string `json:"oidc_issuer"`
@@ -336,6 +382,7 @@ func (srv *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request, id s
 	}
 	next := store.UpdateUserInput{
 		Login:       current.Login,
+		Email:       current.Email,
 		Name:        current.Name,
 		AvatarURL:   current.AvatarURL,
 		OIDCIssuer:  current.OIDCIssuer,
@@ -349,6 +396,9 @@ func (srv *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request, id s
 			return
 		}
 		next.Login = *body.Login
+	}
+	if body.Email != nil {
+		next.Email = *body.Email
 	}
 	if body.Name != nil {
 		if oidcManaged && strings.TrimSpace(*body.Name) != strings.TrimSpace(current.Name) {

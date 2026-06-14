@@ -34,7 +34,7 @@ type digestCacheEntry struct {
 	expiry  int64 // unix timestamp
 }
 
-func NewClient(host string, logger *slog.Logger) (*Client, error) {
+func NewClient(logger *slog.Logger) (*Client, error) {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		return nil, err

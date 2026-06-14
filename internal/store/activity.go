@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -11,10 +12,25 @@ import (
 // ActivityRecord represents a single activity log entry.
 type ActivityRecord struct {
 	Timestamp string `json:"timestamp"`
+	UserID    string `json:"user_id"`
+	UserLogin string `json:"user_login"`
 	Action    string `json:"action"`
 	VMName    string `json:"vm_name"`
 	Status    string `json:"status"`
 	Error     string `json:"error"`
+	Metadata  string `json:"metadata"`
+}
+
+// ActivityFilter holds optional filters for Query.
+type ActivityFilter struct {
+	Limit   int
+	Offset  int
+	Action  string
+	VMName  string
+	Status  string
+	UserID  string
+	Since   string // RFC3339Nano start
+	Until   string // RFC3339Nano end
 }
 
 // ActivityStore persists activity records in SQLite.
@@ -42,23 +58,41 @@ func NewActivityStore(dbPath string, retention int) (*ActivityStore, error) {
 
 func initActivityDB(db *sql.DB) error {
 	_, err := db.Exec(`
-CREATE TABLE IF NOT EXISTS activity (
-    id        INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp TEXT    NOT NULL,
-    action    TEXT    NOT NULL,
-    vm_name   TEXT    NOT NULL,
-    status    TEXT    NOT NULL,
-    error     TEXT    NOT NULL DEFAULT ''
-);
-CREATE INDEX IF NOT EXISTS idx_activity_timestamp ON activity(timestamp DESC);
-CREATE INDEX IF NOT EXISTS idx_activity_action    ON activity(action);
-CREATE INDEX IF NOT EXISTS idx_activity_vm_name   ON activity(vm_name);
-`)
-	return err
+	CREATE TABLE IF NOT EXISTS activity (
+	    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+	    timestamp TEXT    NOT NULL,
+	    user_id   TEXT    NOT NULL DEFAULT '',
+	    user_login TEXT   NOT NULL DEFAULT '',
+	    action    TEXT    NOT NULL,
+	    vm_name   TEXT    NOT NULL,
+	    status    TEXT    NOT NULL,
+	    error     TEXT    NOT NULL DEFAULT '',
+	    metadata  TEXT    NOT NULL DEFAULT ''
+	);
+	CREATE INDEX IF NOT EXISTS idx_activity_timestamp ON activity(timestamp DESC);
+	CREATE INDEX IF NOT EXISTS idx_activity_action    ON activity(action);
+	CREATE INDEX IF NOT EXISTS idx_activity_vm_name   ON activity(vm_name);
+	CREATE INDEX IF NOT EXISTS idx_activity_user_id   ON activity(user_id);
+	CREATE INDEX IF NOT EXISTS idx_activity_status    ON activity(status);
+	`)
+	if err != nil {
+		return err
+	}
+
+	// Migrate existing tables that lack the new columns
+	migrations := []string{
+		"ALTER TABLE activity ADD COLUMN user_id TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE activity ADD COLUMN user_login TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE activity ADD COLUMN metadata TEXT NOT NULL DEFAULT ''",
+	}
+	for _, m := range migrations {
+		db.Exec(m) // column may already exist from a previous run
+	}
+	return nil
 }
 
 // Add inserts a new activity record and trims old entries.
-func (s *ActivityStore) Add(action, vmName, status, errMsg string) error {
+func (s *ActivityStore) Add(userID, userLogin, action, vmName, status, errMsg, metadata string) error {
 	unlock := lockSQLiteWrite()
 	defer unlock()
 
@@ -69,64 +103,97 @@ func (s *ActivityStore) Add(action, vmName, status, errMsg string) error {
 	}
 	defer tx.Rollback() //nolint:errcheck
 	if _, err := tx.Exec(
-		`INSERT INTO activity(timestamp,action,vm_name,status,error) VALUES(?,?,?,?,?)`,
-		now, action, vmName, status, errMsg,
+		`INSERT INTO activity(timestamp,user_id,user_login,action,vm_name,status,error,metadata) VALUES(?,?,?,?,?,?,?,?)`,
+		now, userID, userLogin, action, vmName, status, errMsg, metadata,
 	); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`
-DELETE FROM activity WHERE id NOT IN (
-    SELECT id FROM activity ORDER BY id DESC LIMIT ?
-)`, s.retention); err != nil {
+	DELETE FROM activity WHERE id NOT IN (
+	    SELECT id FROM activity ORDER BY id DESC LIMIT ?
+	)`, s.retention); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-// List returns the most recent activity records, with optional filters.
-func (s *ActivityStore) List(limit int, action, vmName string) ([]ActivityRecord, error) {
-	if limit < 1 {
-		limit = 1
+// Query returns filtered activity records plus a total count.
+func (s *ActivityStore) Query(filter ActivityFilter) ([]ActivityRecord, int, error) {
+	if filter.Limit < 1 {
+		filter.Limit = 50
 	}
-	if limit > 1000 {
-		limit = 1000
+	if filter.Limit > 1000 {
+		filter.Limit = 1000
+	}
+	if filter.Offset < 0 {
+		filter.Offset = 0
 	}
 
-	query := `SELECT timestamp,action,vm_name,status,error FROM activity`
-	var where []string
+	var wheres []string
 	var args []any
-	if action != "" {
-		where = append(where, "action = ?")
-		args = append(args, action)
-	}
-	if vmName != "" {
-		where = append(where, "vm_name = ?")
-		args = append(args, vmName)
-	}
-	if len(where) > 0 {
-		query += " WHERE " + where[0]
-		for _, w := range where[1:] {
-			query += " AND " + w
-		}
-	}
-	query += " ORDER BY id DESC LIMIT ?"
-	args = append(args, limit)
 
-	rows, err := s.db.Query(query, args...)
+	if filter.Action != "" {
+		wheres = append(wheres, "action = ?")
+		args = append(args, filter.Action)
+	}
+	if filter.VMName != "" {
+		wheres = append(wheres, "vm_name = ?")
+		args = append(args, filter.VMName)
+	}
+	if filter.Status != "" {
+		wheres = append(wheres, "status = ?")
+		args = append(args, filter.Status)
+	}
+	if filter.UserID != "" {
+		wheres = append(wheres, "user_id = ?")
+		args = append(args, filter.UserID)
+	}
+	if filter.Since != "" {
+		wheres = append(wheres, "timestamp >= ?")
+		args = append(args, filter.Since)
+	}
+	if filter.Until != "" {
+		wheres = append(wheres, "timestamp <= ?")
+		args = append(args, filter.Until)
+	}
+
+	whereClause := ""
+	if len(wheres) > 0 {
+		whereClause = " WHERE " + strings.Join(wheres, " AND ")
+	}
+
+	// Count total
+	var total int
+	countQuery := "SELECT COUNT(*) FROM activity" + whereClause
+	if err := s.db.QueryRow(countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	// Select with pagination
+	selectQuery := "SELECT timestamp,user_id,user_login,action,vm_name,status,error,metadata FROM activity" + whereClause + " ORDER BY id DESC LIMIT ? OFFSET ?"
+	args = append(args, filter.Limit, filter.Offset)
+
+	rows, err := s.db.Query(selectQuery, args...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 
 	var records []ActivityRecord
 	for rows.Next() {
 		var r ActivityRecord
-		if err := rows.Scan(&r.Timestamp, &r.Action, &r.VMName, &r.Status, &r.Error); err != nil {
-			return nil, err
+		if err := rows.Scan(&r.Timestamp, &r.UserID, &r.UserLogin, &r.Action, &r.VMName, &r.Status, &r.Error, &r.Metadata); err != nil {
+			return nil, 0, err
 		}
 		records = append(records, r)
 	}
-	return records, rows.Err()
+	return records, total, rows.Err()
+}
+
+// List returns the most recent activity records, with optional filters. Deprecated: use Query.
+func (s *ActivityStore) List(limit int, action, vmName string) ([]ActivityRecord, error) {
+	records, _, err := s.Query(ActivityFilter{Limit: limit, Action: action, VMName: vmName})
+	return records, err
 }
 
 // Close closes the underlying database.

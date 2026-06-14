@@ -13,12 +13,9 @@ import Dashboard from './pages/Dashboard'
 import Containers from './pages/Containers'
 import ContainerDetails from './pages/ContainerDetails'
 import Projects from './pages/Projects'
-import Instances from './pages/Instances'
-import MachineDetails from './pages/MachineDetails'
 import Networks from './pages/Networks'
 import Images from './pages/Images'
 import Volumes from './pages/Volumes'
-import Builder from './pages/Builder'
 import NewContainer from './pages/NewContainer'
 import Users from './pages/Users'
 import Logs from './pages/Logs'
@@ -118,7 +115,6 @@ function AppInner({ onLogout }) {
     if (path === '/containers') return 'Containers'
     if (path.startsWith('/containers/')) return 'Containers'
     if (path === '/projects') return 'Projects'
-    if (path.startsWith('/containers/')) return 'Containers'
     if (path === '/networks') return 'Networks'
     if (path === '/images') return 'Images'
     if (path === '/volumes') return 'Volumes'
@@ -216,12 +212,9 @@ function AppInner({ onLogout }) {
           <Route path="/containers/new" element={<NewContainer />} />
           <Route path="/containers/:name" element={<ContainerDetails />} />
           <Route path="/projects" element={<Projects />} />
-          <Route path="/instances" element={<Instances onNewInstance={goNewInstance} />} />
-          <Route path="/instances/:name" element={<MachineDetails />} />
           <Route path="/networks" element={<Networks />} />
           <Route path="/images" element={<Images />} />
           <Route path="/volumes" element={<Volumes />} />
-          <Route path="/builder" element={<Builder />} />
           <Route path="/users" element={<Users />} />
           <Route path="/logs" element={<Logs />} />
           <Route path="/settings" element={<Settings />} />

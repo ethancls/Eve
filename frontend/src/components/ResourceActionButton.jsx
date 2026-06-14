@@ -16,6 +16,7 @@ export default function ResourceActionButton({
         aria-label={label}
         disabled={disabled || isLoading}
         onClick={!disabled && !isLoading ? onClick : undefined}
+        className="resource-action-btn"
         style={{
           width: 34,
           height: 34,

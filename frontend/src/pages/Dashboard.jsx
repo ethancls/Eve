@@ -119,7 +119,7 @@ export default function Dashboard({ onNewInstance }) {
         </div>
         <div className="dashboard-header-actions">
           <SearchBar fluid triggerLabel="Search" controlHeight={40} tourId="dashboard-search" />
-          <button className="btn-accent dashboard-new-btn" data-tour="new-instance-primary" onClick={onNewInstance}>
+          <button className="btn-accent dashboard-new-btn page-action-btn" data-tour="new-instance-primary" onClick={onNewInstance}>
             <Plus size={13} /> New Container
           </button>
         </div>

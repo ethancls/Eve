@@ -85,6 +85,10 @@ export default function ContainerDataTable({
   columns,
   empty = 'No resources',
   renderActions,
+  tableMinWidth = 760,
+  tableLayout = 'auto',
+  selectionWidth = 42,
+  actionsWidth,
   selectedKeys = null,
   getItemKey = (item) => item.id || item.name || item.image,
   onToggleSelect,
@@ -109,11 +113,18 @@ export default function ContainerDataTable({
   return (
     <div className="instances-table-shell" style={{ background: 'var(--card-1)', borderRadius: 'var(--r-card)', border: '1px solid var(--border)', overflow: 'visible' }}>
       <div className="instances-table-scroll no-scrollbar" style={{ overflowX: 'auto', overflowY: 'visible' }}>
-        <table style={{ width: '100%', minWidth: 760, borderCollapse: 'collapse' }}>
+        <table style={{ width: '100%', minWidth: tableMinWidth, tableLayout, borderCollapse: 'collapse' }}>
+          <colgroup>
+            {selectable && <col style={{ width: selectionWidth }} />}
+            {resolvedColumns.map((col) => (
+              <col key={col.key || col.label} style={col.width ? { width: col.width } : undefined} />
+            ))}
+            {renderActions && <col style={actionsWidth ? { width: actionsWidth } : undefined} />}
+          </colgroup>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border)' }}>
               {selectable && (
-                <th style={{ padding: '10px 8px 10px 12px', width: 42 }}>
+                <th style={{ padding: '10px 8px 10px 12px', width: selectionWidth }}>
                   <SelectionRadio
                     checked={allSelected}
                     label={allSelected ? 'Unselect visible containers' : 'Select visible containers'}
@@ -122,7 +133,7 @@ export default function ContainerDataTable({
                 </th>
               )}
               {resolvedColumns.map((col) => <SortTh key={col.key || col.label} col={col} sort={sort} onSort={toggleSort} />)}
-              {renderActions && <th style={{ padding: '10px 12px', textAlign: 'right', fontSize: 10.5, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Actions</th>}
+              {renderActions && <th style={{ padding: '10px 12px', textAlign: 'right', fontSize: 10.5, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.08em', width: actionsWidth }}>Actions</th>}
             </tr>
           </thead>
           <tbody>
@@ -161,7 +172,7 @@ export default function ContainerDataTable({
                     </td>
                   ))}
                   {renderActions && (
-                    <td style={{ padding: '10px 12px', textAlign: 'right' }}>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', width: actionsWidth, maxWidth: actionsWidth }}>
                       {renderActions(item)}
                     </td>
                   )}
